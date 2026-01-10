@@ -1,0 +1,4 @@
+# Template images directory
+# Place game-specific template images here
+# Structure: config/templates/<game_name>/<template_name>.png
+

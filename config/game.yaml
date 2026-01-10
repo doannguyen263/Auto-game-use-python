@@ -1,0 +1,400 @@
+# Game Configuration - Anh Hùng Bất Diệt
+name: "Anh Hùng Bất Diệt"
+version: "1.0.0"
+
+# Screen resolution (adjust based on your emulator)
+screen_width: 1080
+screen_height: 1920
+
+# Default settings
+defaults:
+  click_delay: 1.0          # Delay after click (seconds)
+  swipe_duration: 300        # Swipe duration (milliseconds)
+  template_threshold: 0.8    # Template matching threshold (0-1)
+  wait_timeout: 10           # Default timeout for wait operations (seconds)
+
+# Tasks definition
+tasks:
+  # Tự động đăng nhập và nhận thưởng
+  auto_login:
+    name: "Auto Login"
+    description: "Tự động đăng nhập game và nhận thưởng đăng nhập"
+    steps:
+      - type: wait
+        name: "Wait for game to load"
+        duration: 5.0
+      
+      - type: find_and_click
+        name: "Click to start/login"
+        template: "start_button.png"
+        timeout: 15
+        threshold: 0.8
+        delay: 2.0
+      
+      - type: find_and_click
+        name: "Accept daily login reward"
+        template: "daily_reward_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close reward popup"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+
+  # Làm nhiệm vụ hàng ngày
+  daily_quest:
+    name: "Daily Quest"
+    description: "Tự động làm nhiệm vụ hàng ngày"
+    steps:
+      - type: wait
+        name: "Initial wait"
+        duration: 2.0
+      
+      - type: find_and_click
+        name: "Open quest menu"
+        template: "quest_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Select daily quest tab"
+        template: "daily_quest_tab.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Accept first quest"
+        template: "accept_quest_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: wait
+        name: "Wait for quest completion"
+        duration: 30.0
+      
+      - type: find_and_click
+        name: "Claim quest reward"
+        template: "claim_reward_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close quest menu"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+
+  # Tự động chiến đấu
+  auto_battle:
+    name: "Auto Battle"
+    description: "Tự động chiến đấu và farm"
+    steps:
+      - type: find_and_click
+        name: "Open battle menu"
+        template: "battle_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Select stage"
+        template: "stage_select_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Start battle"
+        template: "start_battle_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Enable auto battle"
+        template: "auto_battle_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 0.5
+      
+      - type: wait
+        name: "Wait for battle to complete"
+        duration: 180.0
+      
+      - type: find_and_click
+        name: "Close result screen"
+        template: "close_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+
+  # Thu thập phần thưởng
+  collect_rewards:
+    name: "Collect Rewards"
+    description: "Thu thập phần thưởng từ mailbox, events, etc."
+    steps:
+      - type: find_and_click
+        name: "Open mailbox"
+        template: "mailbox_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Collect all mail"
+        template: "collect_all_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close mailbox"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Open events"
+        template: "events_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Claim event rewards"
+        template: "claim_reward_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close events"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+
+  # Nâng cấp nhân vật
+  upgrade_hero:
+    name: "Upgrade Hero"
+    description: "Nâng cấp nhân vật và trang bị"
+    steps:
+      - type: find_and_click
+        name: "Open hero menu"
+        template: "hero_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Select hero"
+        template: "hero_select_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Click upgrade button"
+        template: "upgrade_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Confirm upgrade"
+        template: "confirm_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close hero menu"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+
+  # Đấu Arena
+  arena_battle:
+    name: "Arena Battle"
+    description: "Tự động đấu Arena"
+    steps:
+      - type: find_and_click
+        name: "Open arena menu"
+        template: "arena_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Select opponent"
+        template: "opponent_select_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Start arena battle"
+        template: "start_battle_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: wait
+        name: "Wait for battle"
+        duration: 60.0
+      
+      - type: find_and_click
+        name: "Close result"
+        template: "close_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+
+  # Farm Dungeon
+  dungeon_farm:
+    name: "Dungeon Farm"
+    description: "Farm dungeon để lấy tài nguyên"
+    steps:
+      - type: find_and_click
+        name: "Open dungeon menu"
+        template: "dungeon_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Select dungeon"
+        template: "dungeon_select_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Start dungeon"
+        template: "start_battle_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Enable auto"
+        template: "auto_battle_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 0.5
+      
+      - type: wait
+        name: "Wait for completion"
+        duration: 120.0
+      
+      - type: find_and_click
+        name: "Close result"
+        template: "close_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+
+  # Nhiệm vụ Guild
+  guild_tasks:
+    name: "Guild Tasks"
+    description: "Làm nhiệm vụ guild"
+    steps:
+      - type: find_and_click
+        name: "Open guild menu"
+        template: "guild_menu_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.5
+      
+      - type: find_and_click
+        name: "Open guild tasks"
+        template: "guild_tasks_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Accept guild task"
+        template: "accept_quest_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: wait
+        name: "Wait for task completion"
+        duration: 60.0
+      
+      - type: find_and_click
+        name: "Claim guild reward"
+        template: "claim_reward_button.png"
+        timeout: 10
+        threshold: 0.8
+        delay: 1.0
+      
+      - type: find_and_click
+        name: "Close guild menu"
+        template: "close_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+
+  # Task tổng hợp - chạy tất cả
+  full_auto:
+    name: "Full Auto"
+    description: "Chạy tất cả các task tự động"
+    steps:
+      - type: wait
+        name: "Initial wait"
+        duration: 3.0
+      
+      # Login và nhận thưởng
+      - type: find_and_click
+        name: "Check daily reward"
+        template: "daily_reward_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+        required: false
+      
+      # Thu thập phần thưởng
+      - type: find_and_click
+        name: "Collect mailbox"
+        template: "mailbox_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+        required: false
+      
+      # Làm nhiệm vụ hàng ngày
+      - type: find_and_click
+        name: "Do daily quests"
+        template: "quest_menu_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+        required: false
+      
+      # Auto battle
+      - type: find_and_click
+        name: "Auto battle"
+        template: "battle_menu_button.png"
+        timeout: 5
+        threshold: 0.8
+        delay: 1.0
+        required: false
+      
+      - type: wait
+        name: "Wait for activities"
+        duration: 300.0
+

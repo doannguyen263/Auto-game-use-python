@@ -1,0 +1,3 @@
+# Additional requirements for GUI and building exe
+pyinstaller>=5.13.0
+
