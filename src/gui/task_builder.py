@@ -2,7 +2,7 @@
 Task Builder Window - Create and edit tasks visually
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 from pathlib import Path
 import yaml
 from typing import Dict, Any, List
@@ -25,7 +25,7 @@ class TaskBuilderWindow:
         
         # Set window size
         width = 667
-        height = 700
+        height = 750
         
         # Get screen dimensions
         screen_width = self.window.winfo_screenwidth()
@@ -121,7 +121,7 @@ class TaskBuilderWindow:
         # Step type
         ttk.Label(editor_frame, text="Loại Step:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.step_type_var = tk.StringVar(value="wait")
-        step_types = ["wait", "click", "swipe", "find_and_click", "wait_template", "screenshot"]
+        step_types = ["wait", "click", "swipe", "find_and_click", "wait_template", "screenshot", "notification"]
         step_type_combo = ttk.Combobox(editor_frame, textvariable=self.step_type_var, values=step_types, width=20)
         step_type_combo.grid(row=0, column=1, padx=5, pady=5)
         step_type_combo.bind("<<ComboboxSelected>>", self.on_step_type_changed)
@@ -238,7 +238,18 @@ class TaskBuilderWindow:
                     self.params_frame,
                     text="Tiếp tục step tiếp theo nếu không tìm thấy",
                     variable=self.continue_if_not_found_var
-                ).grid(row=row+3, column=0, columnspan=4, sticky=tk.W, padx=5)
+                ).grid(row=row+3, column=0, columnspan=2, sticky=tk.W, padx=5)
+                
+                # Conditional branching: goto step if found/not found
+                ttk.Label(self.params_frame, text="Nếu tìm thấy, nhảy đến step:").grid(row=row+4, column=0, sticky=tk.W, padx=5)
+                self.goto_step_if_found_var = tk.StringVar()
+                ttk.Entry(self.params_frame, textvariable=self.goto_step_if_found_var, width=10).grid(row=row+4, column=1, padx=5, sticky=tk.W)
+                ttk.Label(self.params_frame, text="(để trống = tiếp tục bình thường)").grid(row=row+4, column=2, sticky=tk.W, padx=5)
+                
+                ttk.Label(self.params_frame, text="Nếu không tìm thấy, nhảy đến step:").grid(row=row+5, column=0, sticky=tk.W, padx=5)
+                self.goto_step_if_not_found_var = tk.StringVar()
+                ttk.Entry(self.params_frame, textvariable=self.goto_step_if_not_found_var, width=10).grid(row=row+5, column=1, padx=5, sticky=tk.W)
+                ttk.Label(self.params_frame, text="(để trống = dùng option trên)").grid(row=row+5, column=2, sticky=tk.W, padx=5)
         
         elif step_type == "screenshot":
             ttk.Label(self.params_frame, text="Đường dẫn lưu:").grid(row=row, column=0, sticky=tk.W, padx=5)
@@ -249,6 +260,18 @@ class TaskBuilderWindow:
             ttk.Label(
                 self.params_frame,
                 text="(Để trống sẽ tự động: screenshots/<game>/<task>/screenshot_<timestamp>.png)",
+                font=("Arial", 8),
+                foreground="gray"
+            ).grid(row=row+1, column=0, columnspan=4, sticky=tk.W, padx=5)
+        
+        elif step_type == "notification":
+            ttk.Label(self.params_frame, text="Nội dung thông báo:").grid(row=row, column=0, sticky=tk.NW, padx=5, pady=5)
+            # Use ScrolledText for multi-line input
+            self.notification_text = scrolledtext.ScrolledText(self.params_frame, width=50, height=6, wrap=tk.WORD)
+            self.notification_text.grid(row=row, column=1, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+            ttk.Label(
+                self.params_frame,
+                text="(Thông báo này sẽ hiển thị khi chạy đến step này, người dùng có thể chọn Tiếp tục hoặc Dừng lại)",
                 font=("Arial", 8),
                 foreground="gray"
             ).grid(row=row+1, column=0, columnspan=4, sticky=tk.W, padx=5)
@@ -768,9 +791,32 @@ class TaskBuilderWindow:
                     step["delay"] = float(self.delay_template_var.get() or "0.5")
                     step["click_all"] = self.click_all_var.get() if hasattr(self, 'click_all_var') else False
                     step["continue_if_not_found"] = self.continue_if_not_found_var.get() if hasattr(self, 'continue_if_not_found_var') else False
+                    
+                    # Conditional branching
+                    if hasattr(self, 'goto_step_if_found_var'):
+                        goto_found = self.goto_step_if_found_var.get().strip()
+                        if goto_found:
+                            try:
+                                step["goto_step_if_found"] = int(goto_found)
+                            except ValueError:
+                                raise ValueError(f"Step index không hợp lệ: {goto_found}")
+                    
+                    if hasattr(self, 'goto_step_if_not_found_var'):
+                        goto_not_found = self.goto_step_if_not_found_var.get().strip()
+                        if goto_not_found:
+                            try:
+                                step["goto_step_if_not_found"] = int(goto_not_found)
+                            except ValueError:
+                                raise ValueError(f"Step index không hợp lệ: {goto_not_found}")
             
             elif step_type == "screenshot":
                 step["save_path"] = self.save_path_var.get() or ""
+            
+            elif step_type == "notification":
+                if hasattr(self, 'notification_text'):
+                    step["message"] = self.notification_text.get("1.0", tk.END).strip()
+                else:
+                    step["message"] = ""
         except (ValueError, AttributeError) as e:
             raise ValueError(f"Lỗi nhập liệu: {e}. Vui lòng kiểm tra lại các giá trị.")
         
@@ -805,8 +851,21 @@ class TaskBuilderWindow:
                     self.click_all_var.set(step.get("click_all", False))
                 if hasattr(self, 'continue_if_not_found_var'):
                     self.continue_if_not_found_var.set(step.get("continue_if_not_found", False))
+                
+                # Load conditional branching
+                if hasattr(self, 'goto_step_if_found_var'):
+                    goto_found = step.get("goto_step_if_found")
+                    self.goto_step_if_found_var.set(str(goto_found) if goto_found else "")
+                if hasattr(self, 'goto_step_if_not_found_var'):
+                    goto_not_found = step.get("goto_step_if_not_found")
+                    self.goto_step_if_not_found_var.set(str(goto_not_found) if goto_not_found else "")
         elif step_type == "screenshot":
             self.save_path_var.set(step.get("save_path", "screenshots/screenshot.png"))
+        
+        elif step_type == "notification":
+            if hasattr(self, 'notification_text'):
+                self.notification_text.delete("1.0", tk.END)
+                self.notification_text.insert("1.0", step.get("message", ""))
     
     def clear_step_ui(self):
         """Clear step UI and exit edit mode"""

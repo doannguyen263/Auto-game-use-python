@@ -605,7 +605,41 @@ class MainWindow:
                 self.log("✓ Đã kết nối đến emulator")
                 
                 # Create task manager
-                self.task_manager = TaskManager(self.emulator, game_config, gui_logger, game_name=game_name)
+                # Create notification callback
+                def notification_callback(message, step_name):
+                    """Callback to show notification dialog - runs in main thread"""
+                    import threading
+                    result_event = threading.Event()
+                    result_value = [True]  # Default to continue
+                    
+                    def show_dialog():
+                        try:
+                            result_value[0] = self.show_notification_dialog(message, step_name)
+                        except Exception as e:
+                            self.log(f"Lỗi khi hiển thị dialog: {e}")
+                            result_value[0] = True  # Default to continue on error
+                        finally:
+                            result_event.set()
+                    
+                    # Schedule dialog in main thread
+                    self.root.after(0, show_dialog)
+                    
+                    # Wait for dialog result (with timeout)
+                    result_event.wait(timeout=300)  # 5 minute timeout
+                    
+                    return result_value[0]
+                
+                self.task_manager = TaskManager(
+                    self.emulator, 
+                    game_config, 
+                    gui_logger, 
+                    game_name=game_name,
+                    notification_callback=notification_callback
+                )
+                
+                # Reset user_requested_stop flag
+                if hasattr(self.task_manager, 'user_requested_stop'):
+                    self.task_manager.user_requested_stop = False
                 
                 # Get repeat settings
                 repeat_mode = self.repeat_mode.get()
@@ -617,7 +651,13 @@ class MainWindow:
                 if repeat_mode == "none":
                     # Run once
                     success = self.task_manager.run_task(task_name)
-                    if success:
+                    
+                    # Check if user requested stop from notification dialog
+                    if self.task_manager and hasattr(self.task_manager, 'user_requested_stop') and self.task_manager.user_requested_stop:
+                        self.log("Người dùng đã chọn dừng từ thông báo")
+                        self.running = False
+                        self.root.after(0, lambda: self.update_status("Đã dừng"))
+                    elif success:
                         self.log("✓ Task hoàn thành thành công!")
                         self.root.after(0, lambda: self.update_status("Hoàn thành"))
                     else:
@@ -634,6 +674,13 @@ class MainWindow:
                         
                         self.log(f"--- Lần lặp {i+1}/{repeat_count} ---")
                         success = self.task_manager.run_task(task_name)
+                        
+                        # Check if user requested stop from notification dialog
+                        if self.task_manager and hasattr(self.task_manager, 'user_requested_stop') and self.task_manager.user_requested_stop:
+                            self.log("Người dùng đã chọn dừng từ thông báo")
+                            self.running = False
+                            break
+                        
                         if success:
                             total_success += 1
                             self.log(f"✓ Lần {i+1} hoàn thành")
@@ -659,6 +706,13 @@ class MainWindow:
                         current_iteration = self.iteration_counter
                         self.log(f"--- Lần lặp {current_iteration} ---")
                         success = self.task_manager.run_task(task_name)
+                        
+                        # Check if user requested stop from notification dialog
+                        if self.task_manager and hasattr(self.task_manager, 'user_requested_stop') and self.task_manager.user_requested_stop:
+                            self.log("Người dùng đã chọn dừng từ thông báo")
+                            self.running = False
+                            break
+                        
                         if success:
                             self.log(f"✓ Lần {current_iteration} hoàn thành")
                         else:
@@ -694,6 +748,94 @@ class MainWindow:
         self.update_status("Đã dừng")
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
+    
+    def show_notification_dialog(self, message: str, step_name: str) -> bool:
+        """
+        Show notification dialog with Continue/Stop buttons
+        
+        Args:
+            message: Message to display
+            step_name: Name of the step
+            
+        Returns:
+            True if user clicked Continue, False if user clicked Stop
+        """
+        # Create dialog window
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Thông báo - {step_name}")
+        dialog.transient(self.root)
+        dialog.grab_set()  # Make dialog modal
+        
+        # Center dialog on screen
+        dialog.update_idletasks()
+        width = 500
+        height = 300
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.resizable(False, False)
+        
+        # Result variable
+        result = [True]  # Default to continue
+        
+        # Title
+        title_label = ttk.Label(
+            dialog, 
+            text=f"Đã chạy đến bước: {step_name}",
+            font=("Arial", 12, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # Message
+        message_frame = ttk.Frame(dialog)
+        message_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        message_text = scrolledtext.ScrolledText(
+            message_frame,
+            wrap=tk.WORD,
+            width=50,
+            height=8,
+            font=("Arial", 10)
+        )
+        message_text.pack(fill=tk.BOTH, expand=True)
+        message_text.insert("1.0", message)
+        message_text.config(state=tk.DISABLED)  # Read-only
+        
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        def on_continue():
+            result[0] = True
+            dialog.destroy()
+        
+        def on_stop():
+            result[0] = False
+            dialog.destroy()
+        
+        continue_button = ttk.Button(
+            button_frame,
+            text="▶ Tiếp tục",
+            command=on_continue,
+            width=15
+        )
+        continue_button.pack(side=tk.LEFT, padx=10)
+        
+        stop_button = ttk.Button(
+            button_frame,
+            text="⏹ Dừng lại",
+            command=on_stop,
+            width=15
+        )
+        stop_button.pack(side=tk.LEFT, padx=10)
+        
+        # Focus on dialog
+        dialog.focus_set()
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        
+        return result[0]
     
     def open_game_manager(self):
         """Open game manager window"""

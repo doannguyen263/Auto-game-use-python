@@ -19,7 +19,8 @@ class TaskManager:
         emulator: EmulatorController,
         game_config: Dict[str, Any],
         logger=None,
-        game_name: str = None
+        game_name: str = None,
+        notification_callback=None
     ):
         """
         Initialize task manager
@@ -29,6 +30,8 @@ class TaskManager:
             game_config: Game configuration
             logger: Logger instance
             game_name: Game name for organizing screenshots
+            notification_callback: Callback function to show notification dialog
+                Should accept (message: str) and return True to continue, False to stop
         """
         self.emulator = emulator
         self.game_config = game_config
@@ -37,6 +40,9 @@ class TaskManager:
         self.running = False
         self.game_name = game_name or game_config.get("name", "unknown")
         self.current_task_name = None
+        self.next_step_index = None  # For conditional branching
+        self.notification_callback = notification_callback  # Callback to show notification dialog
+        self.user_requested_stop = False  # Flag to indicate user requested stop from notification
     
     def run_task(self, task_name: str) -> bool:
         """
@@ -63,14 +69,33 @@ class TaskManager:
         try:
             # Execute task steps
             steps = task_config.get("steps", [])
-            for step_index, step in enumerate(steps, 1):
+            step_index = 1  # Start from step 1 (1-based)
+            
+            while step_index <= len(steps):
                 if not self.running:
                     break
+                
+                step = steps[step_index - 1]  # Convert to 0-based index
+                
+                # Reset next_step_index before executing
+                self.next_step_index = None
                 
                 if not self._execute_step(step, step_index):
                     self.logger.warning(f"Step failed: {step.get('name', 'unknown')}")
                     if step.get("required", True):
                         return False
+                
+                # Check if we need to jump to a specific step
+                if self.next_step_index is not None:
+                    if 1 <= self.next_step_index <= len(steps):
+                        self.logger.info(f"Nhảy đến step {self.next_step_index}")
+                        step_index = self.next_step_index
+                    else:
+                        self.logger.warning(f"Step index không hợp lệ: {self.next_step_index}, tiếp tục step tiếp theo")
+                        step_index += 1
+                else:
+                    # Normal flow: continue to next step
+                    step_index += 1
             
             self.logger.info(f"Task completed: {task_name}")
             return True
@@ -112,6 +137,8 @@ class TaskManager:
             return self._step_find_and_click(step)
         elif step_type == "screenshot":
             return self._step_screenshot(step)
+        elif step_type == "notification":
+            return self._step_notification(step)
         else:
             self.logger.warning(f"Unknown step type: {step_type}")
             return False
@@ -187,6 +214,8 @@ class TaskManager:
         timeout = step.get("timeout", 10)
         click_all = step.get("click_all", False)  # Click all occurrences
         continue_if_not_found = step.get("continue_if_not_found", False)  # Continue to next step if not found
+        goto_step_if_found = step.get("goto_step_if_found")  # Jump to step index if found
+        goto_step_if_not_found = step.get("goto_step_if_not_found")  # Jump to step index if not found
         
         if not template:
             self.logger.error("Find and click step missing template path")
@@ -223,7 +252,11 @@ class TaskManager:
             
             if not all_matches:
                 self.logger.warning(f"No templates found: {template}")
-                if continue_if_not_found:
+                if goto_step_if_not_found:
+                    self.next_step_index = goto_step_if_not_found
+                    self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
+                    return True
+                elif continue_if_not_found:
                     self.logger.info("Tiếp tục step tiếp theo")
                     return True
                 return False
@@ -236,6 +269,11 @@ class TaskManager:
                 self.logger.info(f"Clicking occurrence {i}/{len(all_matches)} at ({x}, {y})")
                 self.emulator.click(x, y)
                 time.sleep(delay)
+            
+            # Check if we need to jump to a specific step after finding
+            if goto_step_if_found:
+                self.next_step_index = goto_step_if_found
+                self.logger.info(f"Đã tìm thấy template, nhảy đến step {goto_step_if_found}")
             
             return True
         else:
@@ -251,10 +289,20 @@ class TaskManager:
                 x, y = result
                 self.emulator.click(x, y)
                 time.sleep(step.get("delay", 0.5))
+                
+                # Check if we need to jump to a specific step after finding
+                if goto_step_if_found:
+                    self.next_step_index = goto_step_if_found
+                    self.logger.info(f"Đã tìm thấy template, nhảy đến step {goto_step_if_found}")
+                
                 return True
             else:
                 self.logger.warning(f"Template not found: {template}")
-                if continue_if_not_found:
+                if goto_step_if_not_found:
+                    self.next_step_index = goto_step_if_not_found
+                    self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
+                    return True
+                elif continue_if_not_found:
                     self.logger.info("Tiếp tục step tiếp theo")
                     return True
                 return False
@@ -279,6 +327,30 @@ class TaskManager:
         if screenshot:
             self.logger.info(f"Screenshot saved: {save_path}")
         return screenshot is not None
+    
+    def _step_notification(self, step: Dict[str, Any]) -> bool:
+        """Show notification dialog to user"""
+        message = step.get("message", "Đã chạy đến bước thông báo")
+        step_name = step.get("name", "Thông báo")
+        
+        self.logger.info(f"Hiển thị thông báo: {step_name}")
+        
+        # If callback is provided, use it to show dialog
+        if self.notification_callback:
+            # Callback should return True to continue, False to stop
+            result = self.notification_callback(message, step_name)
+            if result:
+                self.logger.info("Người dùng chọn: Tiếp tục")
+                return True
+            else:
+                self.logger.info("Người dùng chọn: Dừng lại")
+                self.running = False  # Stop task execution
+                self.user_requested_stop = True  # Mark that user requested stop
+                return False
+        else:
+            # No callback, just log and continue
+            self.logger.warning("Notification callback not set, continuing...")
+            return True
     
     def stop(self):
         """Stop task execution"""
