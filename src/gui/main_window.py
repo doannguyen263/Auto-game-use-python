@@ -58,10 +58,15 @@ class MainWindow:
         self.repeat_mode = tk.StringVar(value="none")  # "none", "manual", "infinite"
         self.repeat_count = tk.IntVar(value=1)
         self.iteration_counter = 0  # Track iteration count across runs
+        self.selected_device_var = tk.StringVar()  # Selected device ID
+        self.available_devices = []  # List of available devices
         
         # Setup UI
         self.setup_ui()
         self.load_games()
+        
+        # Load available devices
+        self.refresh_devices()
         
         # Show window after setup
         self.root.deiconify()
@@ -103,6 +108,20 @@ class MainWindow:
         )
         emulator_combo.grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
         
+        # Device selection
+        ttk.Label(emulator_frame, text="Chọn giả lập:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+        self.device_combo = ttk.Combobox(
+            emulator_frame,
+            textvariable=self.selected_device_var,
+            state="readonly",
+            width=25
+        )
+        self.device_combo.grid(row=0, column=3, sticky=tk.W, padx=5, pady=5)
+        self.device_combo.bind("<<ComboboxSelected>>", self.on_device_selected)
+        
+        # Refresh devices button
+        ttk.Button(emulator_frame, text="🔄", command=self.refresh_devices, width=3).grid(row=0, column=4, padx=2, pady=5)
+        
         # Emulator info label
         self.emulator_info_label = ttk.Label(
             emulator_frame, 
@@ -110,14 +129,12 @@ class MainWindow:
             font=("Arial", 9),
             foreground="gray"
         )
-        self.emulator_info_label.grid(row=0, column=2, sticky=tk.W, padx=10, pady=5)
+        self.emulator_info_label.grid(row=1, column=0, columnspan=5, sticky=tk.W, padx=5, pady=2)
         
         # Connection buttons
         emulator_button_frame = ttk.Frame(emulator_frame)
-        emulator_button_frame.grid(row=1, column=0, columnspan=3, pady=5)
+        emulator_button_frame.grid(row=2, column=0, columnspan=5, pady=5)
         
-        ttk.Button(emulator_button_frame, text="🔌 Kiểm tra kết nối", command=self.test_connection).pack(side=tk.LEFT, padx=5)
-        ttk.Button(emulator_button_frame, text="🎮 Kết nối LDPlayer", command=self.connect_ldplayer).pack(side=tk.LEFT, padx=5)
         ttk.Button(emulator_button_frame, text="📸 Chụp màn hình", command=self.take_screenshot).pack(side=tk.LEFT, padx=5)
         
         # Game selection
@@ -266,6 +283,74 @@ class MainWindow:
         else:
             self.repeat_count_entry.config(state=tk.DISABLED)
     
+    def refresh_devices(self):
+        """Refresh list of available devices"""
+        def refresh():
+            try:
+                adb_path = self.find_adb()
+                if not adb_path:
+                    self.available_devices = []
+                    self.root.after(0, lambda: self.device_combo.config(values=[]))
+                    return
+                
+                devices = EmulatorController.list_all_devices(adb_path)
+                self.available_devices = devices
+                
+                # Update combobox
+                self.root.after(0, lambda: self.device_combo.config(values=devices))
+                
+                # If no device selected and devices available, select first one
+                if devices and not self.selected_device_var.get():
+                    self.root.after(0, lambda: self.selected_device_var.set(devices[0]))
+                    self.root.after(0, lambda: self.on_device_selected(None))
+            except Exception as e:
+                self.log(f"Lỗi khi refresh devices: {e}")
+        
+        threading.Thread(target=refresh, daemon=True).start()
+    
+    def on_device_selected(self, event):
+        """Handle device selection - auto connect to selected device"""
+        device_id = self.selected_device_var.get()
+        if not device_id:
+            return
+        
+        self.log(f"Đang kết nối đến giả lập: {device_id}...")
+        self.update_status(f"Đang kết nối {device_id}...")
+        
+        def connect():
+            try:
+                adb_path = self.find_adb()
+                if not adb_path:
+                    self.log("✗ Không tìm thấy ADB")
+                    self.root.after(0, lambda: self.update_status("Không tìm thấy ADB"))
+                    return
+                
+                emulator_type = self.emulator_type_var.get()
+                emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                
+                if emulator.connect_to_device(device_id):
+                    size = emulator.get_screen_size()
+                    if size:
+                        self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
+                        self.log(f"  Device ID: {emulator.device_id}")
+                        self.root.after(0, lambda s=size, d=device_id: self.update_status(f"Đã kết nối - {d} ({s[0]}x{s[1]})"))
+                    else:
+                        self.log(f"✓ Kết nối thành công! Device: {device_id}")
+                        self.root.after(0, lambda d=device_id: self.update_status(f"Đã kết nối - {d}"))
+                    
+                    # Store connected emulator
+                    self.emulator = emulator
+                else:
+                    self.log("✗ Không thể kết nối đến device")
+                    self.root.after(0, lambda: self.update_status("Kết nối thất bại"))
+            except Exception as e:
+                self.log(f"✗ Lỗi: {e}")
+                import traceback
+                self.log(traceback.format_exc())
+                self.root.after(0, lambda: self.update_status("Lỗi"))
+        
+        threading.Thread(target=connect, daemon=True).start()
+    
     def log(self, message):
         """Add message to log"""
         self.log_text.insert(tk.END, f"{message}\n")
@@ -295,20 +380,24 @@ class MainWindow:
                 
                 self.log(f"Tìm thấy ADB: {adb_path}")
                 
-                # Try selected emulator type
-                emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
-                if emulator.connect():
-                    size = emulator.get_screen_size()
-                    if size:
-                        self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
-                        self.log(f"  Device ID: {emulator.device_id}")
-                        self.root.after(0, lambda s=size: self.update_status(f"Đã kết nối ({emulator_type}) - {s[0]}x{s[1]}"))
-                    else:
-                        self.log("✓ Kết nối thành công!")
-                        self.log(f"  Device ID: {emulator.device_id}")
-                        self.root.after(0, lambda: self.update_status(f"Đã kết nối ({emulator_type})"))
-                    return
+                # List all devices
+                all_devices = EmulatorController.list_all_devices(adb_path)
                 
+                if not all_devices:
+                    # Try to connect using emulator type
+                    emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                    if emulator.connect():
+                        size = emulator.get_screen_size()
+                        if size:
+                            self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
+                            self.log(f"  Device ID: {emulator.device_id}")
+                            self.root.after(0, lambda s=size: self.update_status(f"Đã kết nối ({emulator_type}) - {s[0]}x{s[1]}"))
+                        else:
+                            self.log("✓ Kết nối thành công!")
+                            self.log(f"  Device ID: {emulator.device_id}")
+                            self.root.after(0, lambda: self.update_status(f"Đã kết nối ({emulator_type})"))
+                        return
+                    
                 # If auto failed, try other types
                 if emulator_type == "auto":
                     for other_type in ["ldplayer", "bluestacks", "nox"]:
@@ -322,14 +411,39 @@ class MainWindow:
                             else:
                                 self.log(f"✓ Kết nối thành công với {other_type}!")
                                 self.root.after(0, lambda t=other_type: self.update_status(f"Đã kết nối ({t})"))
+                            # Refresh devices list
+                            self.root.after(0, lambda: self.refresh_devices())
                             return
-                
-                self.log("✗ Không thể kết nối đến emulator")
-                self.log("Vui lòng kiểm tra:")
-                self.log("  1. Emulator đang chạy")
-                self.log("  2. USB debugging đã bật (hoặc ADB enabled cho LDPlayer)")
-                self.log("  3. Click '🎮 Kết nối LDPlayer' để kết nối thủ công")
-                self.root.after(0, lambda: self.update_status("Kết nối thất bại"))
+                    
+                    self.log("✗ Không thể kết nối đến emulator")
+                    self.log("Vui lòng kiểm tra:")
+                    self.log("  1. Emulator đang chạy")
+                    self.log("  2. USB debugging đã bật (hoặc ADB enabled cho LDPlayer)")
+                    self.log("  3. Click '🎮 Kết nối LDPlayer' để kết nối thủ công")
+                    self.root.after(0, lambda: self.update_status("Kết nối thất bại"))
+                elif len(all_devices) == 1:
+                    # Only one device, connect directly
+                    device_id = all_devices[0]
+                    emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                    if emulator.connect_to_device(device_id):
+                        size = emulator.get_screen_size()
+                        if size:
+                            self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
+                            self.log(f"  Device ID: {emulator.device_id}")
+                            self.root.after(0, lambda s=size: self.update_status(f"Đã kết nối - {s[0]}x{s[1]}"))
+                        else:
+                            self.log("✓ Kết nối thành công!")
+                            self.log(f"  Device ID: {emulator.device_id}")
+                            self.root.after(0, lambda: self.update_status("Đã kết nối"))
+                    else:
+                        self.log("✗ Không thể kết nối đến device")
+                        self.root.after(0, lambda: self.update_status("Kết nối thất bại"))
+                else:
+                    # Multiple devices, show selection dialog
+                    self.log(f"Tìm thấy {len(all_devices)} giả lập:")
+                    for device in all_devices:
+                        self.log(f"  - {device}")
+                    self.root.after(0, lambda: self._show_device_selection_dialog(all_devices, adb_path, emulator_type))
             except Exception as e:
                 self.log(f"✗ Lỗi: {e}")
                 import traceback
@@ -337,6 +451,85 @@ class MainWindow:
                 self.root.after(0, lambda: self.update_status("Lỗi"))
         
         threading.Thread(target=test, daemon=True).start()
+    
+    def _show_device_selection_dialog(self, devices: list, adb_path: str, emulator_type: str):
+        """Show dialog to select device when multiple emulators are connected"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Chọn giả lập")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center dialog
+        dialog.update_idletasks()
+        width = 400
+        height = 250
+        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (dialog.winfo_screenheight() // 2) - (height // 2)
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.resizable(False, False)
+        
+        selected_device = [None]
+        
+        # Title
+        ttk.Label(
+            dialog,
+            text=f"Tìm thấy {len(devices)} giả lập. Vui lòng chọn:",
+            font=("Arial", 10, "bold")
+        ).pack(pady=10)
+        
+        # Device list
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        device_var = tk.StringVar()
+        for device in devices:
+            ttk.Radiobutton(
+                list_frame,
+                text=device,
+                variable=device_var,
+                value=device
+            ).pack(anchor=tk.W, pady=2)
+        
+        # Set default selection
+        if devices:
+            device_var.set(devices[0])
+        
+        # Buttons
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        def on_ok():
+            selected_device[0] = device_var.get()
+            dialog.destroy()
+        
+        def on_cancel():
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="Kết nối", command=on_ok, width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Hủy", command=on_cancel, width=12).pack(side=tk.LEFT, padx=5)
+        
+        dialog.focus_set()
+        dialog.wait_window()
+        
+        # Connect to selected device
+        if selected_device[0]:
+            def connect():
+                emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                if emulator.connect_to_device(selected_device[0]):
+                    size = emulator.get_screen_size()
+                    if size:
+                        self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
+                        self.log(f"  Device ID: {emulator.device_id}")
+                        self.root.after(0, lambda s=size: self.update_status(f"Đã kết nối - {s[0]}x{s[1]}"))
+                    else:
+                        self.log("✓ Kết nối thành công!")
+                        self.log(f"  Device ID: {emulator.device_id}")
+                        self.root.after(0, lambda: self.update_status("Đã kết nối"))
+                else:
+                    self.log("✗ Không thể kết nối đến device")
+                    self.root.after(0, lambda: self.update_status("Kết nối thất bại"))
+            
+            threading.Thread(target=connect, daemon=True).start()
     
     def take_screenshot(self):
         """Take screenshot"""
@@ -353,12 +546,67 @@ class MainWindow:
                     self.log("✗ Không tìm thấy ADB")
                     return
                 
-                emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
-                if not emulator.connect():
-                    emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
-                    if not emulator.connect():
-                        self.log("✗ Không thể kết nối đến emulator")
+                # Always refresh devices list first
+                all_devices = EmulatorController.list_all_devices(adb_path)
+                self.available_devices = all_devices
+                
+                # Check if device is already selected
+                selected_device = self.selected_device_var.get()
+                emulator_type = self.emulator_type_var.get()
+                
+                # Create emulator instance
+                emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                
+                # Priority: Use selected device if available
+                if selected_device and selected_device.strip() and selected_device in all_devices:
+                    # Connect to selected device
+                    if not emulator.connect_to_device(selected_device):
+                        self.log("✗ Không thể kết nối đến giả lập đã chọn")
+                        self.log("Vui lòng chọn lại giả lập hoặc kiểm tra kết nối")
                         return
+                    self.log(f"✓ Đã kết nối đến giả lập đã chọn: {selected_device}")
+                else:
+                    # No device selected or selected device not available, try to connect automatically
+                    if not all_devices:
+                        # Try to connect using emulator type
+                        if not emulator.connect():
+                            # Try auto if emulator type fails
+                            emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
+                            if not emulator.connect():
+                                self.log("✗ Không thể kết nối đến emulator")
+                                self.log("Vui lòng chọn giả lập từ dropdown hoặc kiểm tra kết nối")
+                                return
+                        # Update selected device if connection successful
+                        if emulator.device_id:
+                            self.root.after(0, lambda: self.selected_device_var.set(emulator.device_id))
+                            self.log(f"✓ Đã kết nối tự động đến giả lập: {emulator.device_id}")
+                    elif len(all_devices) == 1:
+                        # Only one device, connect directly
+                        device_id = all_devices[0]
+                        if not emulator.connect_to_device(device_id):
+                            self.log("✗ Không thể kết nối đến emulator")
+                            return
+                        # Update selected device
+                        self.root.after(0, lambda: self.selected_device_var.set(device_id))
+                        self.log(f"✓ Đã kết nối đến giả lập (tự động): {device_id}")
+                    else:
+                        # Multiple devices - use first one but warn user
+                        device_id = all_devices[0]
+                        self.log(f"⚠ Tìm thấy {len(all_devices)} giả lập, sử dụng: {device_id}")
+                        self.log(f"  (Vui lòng chọn giả lập cụ thể từ dropdown để chắc chắn)")
+                        if not emulator.connect_to_device(device_id):
+                            self.log("✗ Không thể kết nối đến emulator")
+                            return
+                        # Update selected device
+                        self.root.after(0, lambda: self.selected_device_var.set(device_id))
+                        self.log(f"✓ Đã kết nối đến giả lập: {device_id}")
+                
+                # Final verification: ensure emulator is connected with correct device_id
+                if not emulator.connected or not emulator.device_id:
+                    self.log("✗ Emulator không được kết nối đúng cách")
+                    return
+                
+                self.log(f"✓ Xác nhận: Chụp màn hình từ Device ID: {emulator.device_id}")
                 
                 from datetime import datetime
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -374,6 +622,7 @@ class MainWindow:
                     self.root.after(0, lambda: self.update_status(f"Screenshot: {save_path}"))
                 else:
                     self.log("✗ Không thể chụp màn hình")
+                    self.log(f"  Device ID: {emulator.device_id}, Connected: {emulator.connected}")
             except Exception as e:
                 self.log(f"✗ Lỗi: {e}")
                 import traceback
@@ -504,8 +753,7 @@ class MainWindow:
                                       if line.strip() and 'device' in line and f":{port}" in line]
                             
                             if devices:
-                                self.log(f"✓ Kết nối thành công! Device: {devices[0]}")
-                                self.root.after(0, lambda d=devices[0]: self.update_status(f"Đã kết nối LDPlayer - {d}"))
+                                self.log(f"✓ Đã kết nối đến port {port}")
                                 connected = True
                                 break
                     except FileNotFoundError:
@@ -515,6 +763,30 @@ class MainWindow:
                         self.log(f"Lỗi khi kết nối port {port}: {e}")
                         continue
                 
+                # After connecting, list all devices and let user choose
+                if connected:
+                    all_devices = EmulatorController.list_all_devices(adb_path)
+                    if len(all_devices) > 1:
+                        self.log(f"Tìm thấy {len(all_devices)} giả lập, vui lòng chọn:")
+                        for device in all_devices:
+                            self.log(f"  - {device}")
+                        self.root.after(0, lambda: self._show_device_selection_dialog(all_devices, adb_path, "ldplayer"))
+                    elif len(all_devices) == 1:
+                        device_id = all_devices[0]
+                        emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
+                        if emulator.connect_to_device(device_id):
+                            size = emulator.get_screen_size()
+                            if size:
+                                self.log(f"✓ Kết nối thành công! Resolution: {size[0]}x{size[1]}")
+                                self.log(f"  Device ID: {emulator.device_id}")
+                                self.root.after(0, lambda s=size, d=device_id: self.update_status(f"Đã kết nối LDPlayer - {d} ({s[0]}x{s[1]})"))
+                            else:
+                                self.log(f"✓ Kết nối thành công! Device: {device_id}")
+                                self.root.after(0, lambda d=device_id: self.update_status(f"Đã kết nối LDPlayer - {d}"))
+                        else:
+                            self.log("✗ Không thể kết nối đến device")
+                            self.root.after(0, lambda: self.update_status("Kết nối LDPlayer thất bại"))
+                
                 if not connected:
                     self.log("✗ Không thể kết nối đến LDPlayer")
                     self.log("Vui lòng kiểm tra:")
@@ -523,6 +795,9 @@ class MainWindow:
                     self.log("  3. Thử restart LDPlayer")
                     self.root.after(0, lambda: self.update_status("Kết nối LDPlayer thất bại"))
                 
+            except FileNotFoundError:
+                self.log(f"✗ Không tìm thấy ADB tại: {adb_path}")
+                self.root.after(0, lambda: self.update_status("Không tìm thấy ADB"))
             except Exception as e:
                 self.log(f"✗ Lỗi: {e}")
                 import traceback
@@ -592,17 +867,84 @@ class MainWindow:
                     self.log(f"✗ Không tìm thấy config cho game: {game_name}")
                     return
                 
-                # Connect emulator - try LDPlayer first
-                self.emulator = EmulatorController(emulator_type="ldplayer")
-                if not self.emulator.connect():
-                    # Try auto if LDPlayer fails
-                    self.emulator = EmulatorController(emulator_type="auto")
-                    if not self.emulator.connect():
-                        self.log("✗ Không thể kết nối đến emulator")
-                        self.log("Thử chạy: python connect_ldplayer.py để kết nối LDPlayer")
-                        return
+                # Connect emulator - always use selected device if available
+                adb_path = self.find_adb()
+                if not adb_path:
+                    self.log("✗ Không tìm thấy ADB")
+                    return
                 
-                self.log("✓ Đã kết nối đến emulator")
+                # Always refresh devices list first
+                all_devices = EmulatorController.list_all_devices(adb_path)
+                self.available_devices = all_devices
+                
+                # Check if device is already selected
+                selected_device = self.selected_device_var.get()
+                emulator_type = self.emulator_type_var.get()
+                
+                # Always create new emulator instance to ensure fresh connection
+                self.emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+                
+                # Priority: Use selected device if available
+                if selected_device and selected_device.strip():
+                    # Verify device is still in the list
+                    if selected_device in all_devices:
+                        # Connect to selected device
+                        if not self.emulator.connect_to_device(selected_device):
+                            self.log("✗ Không thể kết nối đến giả lập đã chọn")
+                            self.log("Vui lòng chọn lại giả lập hoặc kiểm tra kết nối")
+                            return
+                        self.log(f"✓ Đã kết nối đến giả lập đã chọn: {selected_device}")
+                        self.log(f"  Device ID trong emulator: {self.emulator.device_id}")
+                        self.log(f"  Emulator connected: {self.emulator.connected}")
+                    else:
+                        # Selected device no longer available, clear selection
+                        self.log(f"⚠ Giả lập đã chọn ({selected_device}) không còn khả dụng")
+                        self.root.after(0, lambda: self.selected_device_var.set(""))
+                        selected_device = None
+                if not selected_device or not selected_device.strip() or selected_device not in all_devices:
+                    # No device selected or selected device not available, try to connect automatically
+                    if not all_devices:
+                        # Try to connect using emulator type
+                        if not self.emulator.connect():
+                            # Try auto if emulator type fails
+                            self.emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
+                            if not self.emulator.connect():
+                                self.log("✗ Không thể kết nối đến emulator")
+                                self.log("Vui lòng chọn giả lập từ dropdown hoặc kiểm tra kết nối")
+                                return
+                        # Update selected device if connection successful
+                        if self.emulator.device_id:
+                            self.root.after(0, lambda: self.selected_device_var.set(self.emulator.device_id))
+                            self.log(f"✓ Đã kết nối tự động đến giả lập: {self.emulator.device_id}")
+                    elif len(all_devices) == 1:
+                        # Only one device, connect directly
+                        device_id = all_devices[0]
+                        if not self.emulator.connect_to_device(device_id):
+                            self.log("✗ Không thể kết nối đến emulator")
+                            return
+                        # Update selected device
+                        self.root.after(0, lambda: self.selected_device_var.set(device_id))
+                        self.log(f"✓ Đã kết nối đến giả lập (tự động): {device_id}")
+                        self.log(f"  Device ID trong emulator: {self.emulator.device_id}")
+                    else:
+                        # Multiple devices - use first one but warn user
+                        device_id = all_devices[0]
+                        self.log(f"⚠ Tìm thấy {len(all_devices)} giả lập, sử dụng: {device_id}")
+                        self.log(f"  (Vui lòng chọn giả lập cụ thể từ dropdown để chắc chắn)")
+                        if not self.emulator.connect_to_device(device_id):
+                            self.log("✗ Không thể kết nối đến emulator")
+                            return
+                        # Update selected device
+                        self.root.after(0, lambda: self.selected_device_var.set(device_id))
+                        self.log(f"✓ Đã kết nối đến giả lập: {device_id}")
+                        self.log(f"  Device ID trong emulator: {self.emulator.device_id}")
+                
+                # Final verification: ensure emulator is connected with correct device_id
+                if not self.emulator.connected or not self.emulator.device_id:
+                    self.log("✗ Emulator không được kết nối đúng cách")
+                    return
+                
+                self.log(f"✓ Xác nhận: Emulator đã sẵn sàng với Device ID: {self.emulator.device_id}")
                 
                 # Create task manager
                 # Create notification callback

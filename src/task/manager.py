@@ -43,6 +43,10 @@ class TaskManager:
         self.next_step_index = None  # For conditional branching
         self.notification_callback = notification_callback  # Callback to show notification dialog
         self.user_requested_stop = False  # Flag to indicate user requested stop from notification
+        
+        # Set logger for emulator if it supports it
+        if hasattr(self.emulator, 'set_logger'):
+            self.emulator.set_logger(self.logger)
     
     def run_task(self, task_name: str) -> bool:
         """
@@ -235,9 +239,14 @@ class TaskManager:
         
         if click_all:
             # Find and click all occurrences
+            # Log device info for debugging
+            if hasattr(self.emulator, 'device_id'):
+                self.logger.info(f"Chụp hình từ device: {self.emulator.device_id}")
             screenshot = self.emulator.screenshot()
             if not screenshot:
                 self.logger.error("Failed to take screenshot")
+                if hasattr(self.emulator, 'device_id'):
+                    self.logger.error(f"Device ID: {self.emulator.device_id}, Connected: {self.emulator.connected}")
                 return False
             
             # Wait a bit for screen to stabilize
@@ -278,6 +287,9 @@ class TaskManager:
             return True
         else:
             # Original behavior: wait for template and click first occurrence
+            # Log device info for debugging
+            if hasattr(self.emulator, 'device_id'):
+                self.logger.info(f"Tìm template từ device: {self.emulator.device_id}")
             result = self.matcher.wait_for_template(
                 self.emulator.screenshot,
                 str(template_path),

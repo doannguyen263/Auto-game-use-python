@@ -298,24 +298,64 @@ class TaskBuilderWindow:
             sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
             from emulator.controller import EmulatorController
             
-            # Connect to emulator
+            # Get ADB path
             adb_path = self.main_window.find_adb()
             if not adb_path:
                 messagebox.showerror("Lỗi", "Không tìm thấy ADB. Vui lòng kiểm tra kết nối emulator.")
                 return
             
-            emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
-            if not emulator.connect():
-                # Try auto
-                emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
-                if not emulator.connect():
-                    messagebox.showerror("Lỗi", "Không thể kết nối đến emulator. Vui lòng kiểm tra kết nối.")
+            # Always refresh devices list first
+            all_devices = EmulatorController.list_all_devices(adb_path)
+            
+            # Get selected device from main window
+            selected_device = self.main_window.selected_device_var.get()
+            emulator_type = self.main_window.emulator_type_var.get()
+            
+            # Create emulator instance
+            emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+            
+            # Priority: Use selected device if available
+            if selected_device and selected_device.strip() and selected_device in all_devices:
+                # Connect to selected device
+                if not emulator.connect_to_device(selected_device):
+                    messagebox.showerror("Lỗi", f"Không thể kết nối đến giả lập đã chọn: {selected_device}\nVui lòng chọn lại giả lập hoặc kiểm tra kết nối.")
                     return
+            else:
+                # No device selected or selected device not available, try to connect automatically
+                if not all_devices:
+                    # Try to connect using emulator type
+                    if not emulator.connect():
+                        # Try auto if emulator type fails
+                        emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
+                        if not emulator.connect():
+                            messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.\nVui lòng chọn giả lập từ dropdown hoặc kiểm tra kết nối.")
+                            return
+                elif len(all_devices) == 1:
+                    # Only one device, connect directly
+                    device_id = all_devices[0]
+                    if not emulator.connect_to_device(device_id):
+                        messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.")
+                        return
+                    # Update selected device in main window
+                    self.main_window.root.after(0, lambda: self.main_window.selected_device_var.set(device_id))
+                else:
+                    # Multiple devices - use first one but warn user
+                    device_id = all_devices[0]
+                    if not emulator.connect_to_device(device_id):
+                        messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.")
+                        return
+                    # Update selected device in main window
+                    self.main_window.root.after(0, lambda: self.main_window.selected_device_var.set(device_id))
+            
+            # Final verification: ensure emulator is connected with correct device_id
+            if not emulator.connected or not emulator.device_id:
+                messagebox.showerror("Lỗi", "Emulator không được kết nối đúng cách.")
+                return
             
             # Take screenshot
             screenshot = emulator.screenshot()
             if not screenshot:
-                messagebox.showerror("Lỗi", "Không thể chụp màn hình emulator.")
+                messagebox.showerror("Lỗi", f"Không thể chụp màn hình emulator.\nDevice ID: {emulator.device_id}, Connected: {emulator.connected}")
                 return
             
             # Create template picker window

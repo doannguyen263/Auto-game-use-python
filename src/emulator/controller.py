@@ -12,13 +12,14 @@ import numpy as np
 class EmulatorController:
     """Control Android emulator via ADB"""
     
-    def __init__(self, emulator_type: str = "auto", adb_path: str = None):
+    def __init__(self, emulator_type: str = "auto", adb_path: str = None, logger=None):
         """
         Initialize emulator controller
         
         Args:
             emulator_type: Type of emulator (auto/bluestacks/nox/ldplayer)
             adb_path: Path to ADB executable (None to auto-detect)
+            logger: Logger instance for logging (optional)
         """
         self.emulator_type = emulator_type
         if adb_path is None:
@@ -27,6 +28,94 @@ class EmulatorController:
             self.adb_path = adb_path
         self.connected = False
         self.device_id = None
+        self.logger = logger  # Logger instance for logging
+    
+    def set_logger(self, logger):
+        """Set logger instance"""
+        self.logger = logger
+    
+    def _log(self, message, level='info'):
+        """Log message using logger if available, otherwise print"""
+        if self.logger:
+            if level == 'info':
+                self.logger.info(message)
+            elif level == 'warning':
+                self.logger.warning(message)
+            elif level == 'error':
+                self.logger.error(message)
+            else:
+                self.logger.info(message)
+        else:
+            print(message)
+    
+    @staticmethod
+    def list_all_devices(adb_path: str = None) -> list:
+        """
+        List all connected devices/emulators
+        
+        Args:
+            adb_path: Path to ADB executable (None to auto-detect)
+        
+        Returns:
+            List of device IDs
+        """
+        if adb_path is None:
+            controller = EmulatorController()
+            adb_path = controller.adb_path
+        
+        try:
+            result = subprocess.run(
+                [adb_path, "devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            devices = []
+            for line in result.stdout.strip().split('\n')[1:]:
+                if line.strip() and 'device' in line:
+                    device_id = line.split()[0]
+                    devices.append(device_id)
+            
+            return devices
+        except Exception as e:
+            print(f"Error listing devices: {e}")
+            return []
+    
+    def connect_to_device(self, device_id: str) -> bool:
+        """
+        Connect to a specific device
+        
+        Args:
+            device_id: Device ID to connect to
+        
+        Returns:
+            True if connected successfully
+        """
+        try:
+            # Check if device exists
+            result = subprocess.run(
+                [self.adb_path, "devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] 
+                      if line.strip() and 'device' in line]
+            
+            if device_id not in devices:
+                print(f"Device {device_id} not found")
+                return False
+            
+            self.device_id = device_id
+            self.connected = True
+            print(f"Connected to device: {self.device_id}")
+            return True
+            
+        except Exception as e:
+            print(f"Error connecting to device: {e}")
+            return False
     
     def _find_adb(self):
         """Find ADB executable"""
@@ -223,6 +312,11 @@ class EmulatorController:
             PIL Image or None if failed
         """
         if not self.connected:
+            self._log(f"Warning: Screenshot called but emulator not connected. Device ID: {self.device_id}", 'warning')
+            return None
+        
+        if not self.device_id:
+            self._log("Warning: Screenshot called but device_id is None", 'warning')
             return None
         
         try:
@@ -231,6 +325,8 @@ class EmulatorController:
             
             # Take screenshot via ADB (binary output)
             full_command = [self.adb_path, "-s", self.device_id, "exec-out", "screencap", "-p"]
+            # Debug: log the command being executed
+            self._log(f"📸 Chụp màn hình từ device: {self.device_id}")
             process = subprocess.run(
                 full_command,
                 capture_output=True,
@@ -238,6 +334,11 @@ class EmulatorController:
             )
             
             if process.returncode != 0:
+                error_msg = f"Screenshot failed for device {self.device_id}, return code: {process.returncode}"
+                if process.stderr:
+                    error_detail = process.stderr.decode('utf-8', errors='ignore')
+                    error_msg += f" - Error: {error_detail}"
+                self._log(error_msg, 'error')
                 return None
             
             # Convert bytes to image
@@ -246,11 +347,12 @@ class EmulatorController:
             # Save if path provided
             if save_path:
                 image.save(save_path)
+                self._log(f"✓ Đã lưu screenshot: {save_path}")
             
             return image
             
         except Exception as e:
-            print(f"Error taking screenshot: {e}")
+            self._log(f"Error taking screenshot from device {self.device_id}: {e}", 'error')
             return None
     
     def click(self, x: int, y: int) -> bool:
