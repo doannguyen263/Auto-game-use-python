@@ -825,14 +825,15 @@ class MainWindow:
                 # After connecting, list all devices and let user choose
                 if connected:
                     all_devices = EmulatorController.list_all_devices(adb_path)
+                    emulator_type = self.emulator_type_var.get()
                     if len(all_devices) > 1:
                         self.log(f"Tìm thấy {len(all_devices)} giả lập, vui lòng chọn:")
                         for device in all_devices:
                             self.log(f"  - {device}")
-                        self.root.after(0, lambda: self._show_device_selection_dialog(all_devices, adb_path, "ldplayer"))
+                        self.root.after(0, lambda: self._show_device_selection_dialog(all_devices, adb_path, emulator_type))
                     elif len(all_devices) == 1:
                         device_id = all_devices[0]
-                        emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
+                        emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
                         if emulator.connect_to_device(device_id):
                             size = emulator.get_screen_size()
                             if size:

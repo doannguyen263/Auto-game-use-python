@@ -253,7 +253,7 @@ class TaskBuilderWindow:
             ttk.Entry(self.params_frame, textvariable=self.timeout_var, width=15).grid(row=row+1, column=1, padx=5)
             
             ttk.Label(self.params_frame, text="Threshold:").grid(row=row+1, column=2, sticky=tk.W, padx=5)
-            self.threshold_var = tk.StringVar(value="0.8")
+            self.threshold_var = tk.StringVar(value="0.7")
             ttk.Entry(self.params_frame, textvariable=self.threshold_var, width=15).grid(row=row+1, column=3, padx=5)
             
             if step_type == "find_and_click":
@@ -319,34 +319,66 @@ class TaskBuilderWindow:
             title="Chọn template image",
             filetypes=[("Image files", "*.png *.jpg *.jpeg"), ("All files", "*.*")]
         )
-        if filename:
-            # Copy to templates directory if not already there
-            sanitized_game_name = sanitize_filename(self.game_name)
-            template_dir = Path("config/templates") / sanitized_game_name
-            template_dir.mkdir(parents=True, exist_ok=True)
-            template_name = Path(filename).name
-            template_path = template_dir / template_name
-            
-            # Copy file if not already in templates directory
-            if Path(filename) != template_path:
-                from shutil import copy2
-                copy2(filename, template_path)
-            
-            # If find_and_click with multi-template support, add to list
-            if hasattr(self, 'templates_listbox'):
-                # Ensure templates_list exists
-                if not hasattr(self, 'templates_list'):
-                    self.templates_list = []
+        if not filename:
+            return  # User cancelled
+        
+        # Copy to templates directory if not already there
+        sanitized_game_name = sanitize_filename(self.game_name)
+        template_dir = Path("config/templates") / sanitized_game_name
+        template_dir.mkdir(parents=True, exist_ok=True)
+        template_name = Path(filename).name
+        template_path = template_dir / template_name
+        
+        # Copy file if not already in templates directory
+        if Path(filename) != template_path:
+            from shutil import copy2
+            try:
+                # Check if file already exists in destination
+                if template_path.exists():
+                    # File already exists, skip copy
+                    pass
+                else:
+                    # Try to copy file
+                    copy2(filename, template_path)
+            except PermissionError:
+                # File might be locked or in use, but if it exists in destination, continue
+                if not template_path.exists():
+                    messagebox.showerror("Lỗi", f"Không thể copy file '{template_name}'. File có thể đang được sử dụng bởi chương trình khác.")
+                    return
+                # File exists, continue even if copy failed
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể copy file '{template_name}': {e}")
+                return
+        
+        # Check step type to determine how to handle template
+        step_type = self.step_type_var.get() if hasattr(self, 'step_type_var') else None
+        
+        # If find_and_click with multi-template support, add to list
+        if step_type == "find_and_click" and hasattr(self, 'templates_listbox') and self.templates_listbox:
+            # Ensure templates_list exists
+            if not hasattr(self, 'templates_list'):
+                self.templates_list = []
+            # Check if template already exists to avoid duplicates
+            if template_name not in self.templates_list:
                 self.templates_list.append(template_name)
                 self.update_templates_listbox()
-                self.templates_listbox.selection_clear(0, tk.END)
-                self.templates_listbox.selection_set(len(self.templates_list) - 1)
-                self.templates_listbox.see(len(self.templates_list) - 1)
-            elif hasattr(self, 'template_var'):
-                self.template_var.set(template_name)
+                if len(self.templates_list) > 0:
+                    self.templates_listbox.selection_clear(0, tk.END)
+                    self.templates_listbox.selection_set(len(self.templates_list) - 1)
+                    self.templates_listbox.see(len(self.templates_list) - 1)
+            else:
+                messagebox.showinfo("Thông báo", f"Template '{template_name}' đã có trong danh sách!")
+        elif hasattr(self, 'template_var'):
+            # For wait_template or other single template steps
+            self.template_var.set(template_name)
     
     def add_template_to_list(self):
         """Add template to list (via browse or capture)"""
+        # Ensure we're in find_and_click mode with templates_listbox
+        if not hasattr(self, 'templates_listbox'):
+            messagebox.showwarning("Cảnh báo", "Chức năng này chỉ dành cho step type 'find_and_click'!")
+            return
+        
         # Show dialog to choose: browse file or capture screenshot
         dialog = tk.Toplevel(self.window)
         dialog.title("Thêm Template")
@@ -360,11 +392,13 @@ class TaskBuilderWindow:
         
         def browse_and_add():
             dialog.destroy()
-            self.browse_template()
+            # Use after to ensure dialog is fully closed before opening file dialog
+            self.window.after(100, self.browse_template)
         
         def capture_and_add():
             dialog.destroy()
-            self.capture_template()
+            # Use after to ensure dialog is fully closed before capturing
+            self.window.after(100, self.capture_template)
         
         ttk.Button(button_frame, text="📁 Chọn file", command=browse_and_add).pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="📸 Chụp màn hình", command=capture_and_add).pack(side=tk.LEFT, padx=5)
@@ -382,9 +416,13 @@ class TaskBuilderWindow:
         
         index = selection[0]
         if 0 <= index < len(self.templates_list):
-            removed = self.templates_list.pop(index)
+            self.templates_list.pop(index)
             self.update_templates_listbox()
-            messagebox.showinfo("Thành công", f"Đã xóa template: {removed}")
+            # Clear selection after removal
+            if self.templates_list:
+                # Select the item at the same index, or the last item if index is out of range
+                new_index = min(index, len(self.templates_list) - 1)
+                self.templates_listbox.selection_set(new_index)
     
     def move_template_up(self):
         """Move selected template up in list"""
@@ -814,11 +852,28 @@ class TaskBuilderWindow:
                 template_dir.mkdir(parents=True, exist_ok=True)
                 template_path = template_dir / template_name
                 
-                template_image.save(template_path)
+                try:
+                    # Save template with PNG format, no compression to ensure exact match
+                    # Get template size for logging
+                    template_size = template_image.size
+                    template_image.save(template_path, "PNG", optimize=False)
+                    # Log template info for debugging
+                    print(f"Template saved: {template_name}, Size: {template_size[0]}x{template_size[1]}, Path: {template_path}")
+                except PermissionError:
+                    messagebox.showerror("Lỗi", f"Không thể lưu template '{template_name}'. File có thể đang được sử dụng bởi chương trình khác.")
+                    picker_window.destroy()
+                    return
+                except Exception as e:
+                    messagebox.showerror("Lỗi", f"Không thể lưu template '{template_name}': {e}")
+                    picker_window.destroy()
+                    return
                 
                 # Set template name (relative to templates directory)
+                # Check step type to determine how to handle template
+                step_type = self.step_type_var.get() if hasattr(self, 'step_type_var') else None
+                
                 # If find_and_click with multi-template support, add to list
-                if hasattr(self, 'templates_listbox'):
+                if step_type == "find_and_click" and hasattr(self, 'templates_listbox') and self.templates_listbox:
                     # Ensure templates_list exists
                     if not hasattr(self, 'templates_list'):
                         self.templates_list = []
@@ -828,6 +883,7 @@ class TaskBuilderWindow:
                     self.templates_listbox.selection_set(len(self.templates_list) - 1)
                     self.templates_listbox.see(len(self.templates_list) - 1)
                 elif hasattr(self, 'template_var'):
+                    # For wait_template or other single template steps
                     self.template_var.set(template_name)
                 
                 picker_window.destroy()
@@ -987,7 +1043,7 @@ class TaskBuilderWindow:
                         step["templates"] = [template_value]  # Convert to list for consistency
                 
                 step["timeout"] = int(self.timeout_var.get() or "10")
-                step["threshold"] = float(self.threshold_var.get() or "0.8")
+                step["threshold"] = float(self.threshold_var.get() or "0.7")
                 if step_type == "find_and_click":
                     step["delay"] = float(self.delay_template_var.get() or "0.5")
                     step["click_all"] = self.click_all_var.get() if hasattr(self, 'click_all_var') else False
@@ -1060,7 +1116,7 @@ class TaskBuilderWindow:
                 self.template_var.set(template_value)
             
             self.timeout_var.set(str(step.get("timeout", 10)))
-            self.threshold_var.set(str(step.get("threshold", 0.8)))
+            self.threshold_var.set(str(step.get("threshold", 0.7)))
             if step_type == "find_and_click":
                 self.delay_template_var.set(str(step.get("delay", 0.5)))
                 if hasattr(self, 'click_all_var'):
@@ -1232,24 +1288,64 @@ class TaskBuilderWindow:
             sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
             from emulator.controller import EmulatorController
             
-            # Connect to emulator
+            # Get ADB path
             adb_path = self.main_window.find_adb()
             if not adb_path:
                 messagebox.showerror("Lỗi", "Không tìm thấy ADB. Vui lòng kiểm tra kết nối emulator.")
                 return
             
-            emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
-            if not emulator.connect():
-                # Try auto
-                emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
-                if not emulator.connect():
-                    messagebox.showerror("Lỗi", "Không thể kết nối đến emulator. Vui lòng kiểm tra kết nối.")
+            # Always refresh devices list first
+            all_devices = EmulatorController.list_all_devices(adb_path)
+            
+            # Get selected device from main window
+            selected_device = self.main_window.selected_device_var.get()
+            emulator_type = self.main_window.emulator_type_var.get()
+            
+            # Create emulator instance
+            emulator = EmulatorController(emulator_type=emulator_type, adb_path=adb_path)
+            
+            # Priority: Use selected device if available
+            if selected_device and selected_device.strip() and selected_device in all_devices:
+                # Connect to selected device
+                if not emulator.connect_to_device(selected_device):
+                    messagebox.showerror("Lỗi", f"Không thể kết nối đến giả lập đã chọn: {selected_device}\nVui lòng chọn lại giả lập hoặc kiểm tra kết nối.")
                     return
+            else:
+                # No device selected or selected device not available, try to connect automatically
+                if not all_devices:
+                    # Try to connect using emulator type
+                    if not emulator.connect():
+                        # Try auto if emulator type fails
+                        emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
+                        if not emulator.connect():
+                            messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.\nVui lòng chọn giả lập từ dropdown hoặc kiểm tra kết nối.")
+                            return
+                elif len(all_devices) == 1:
+                    # Only one device, connect directly
+                    device_id = all_devices[0]
+                    if not emulator.connect_to_device(device_id):
+                        messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.")
+                        return
+                    # Update selected device in main window
+                    self.main_window.root.after(0, lambda: self.main_window.selected_device_var.set(device_id))
+                else:
+                    # Multiple devices - use first one but warn user
+                    device_id = all_devices[0]
+                    if not emulator.connect_to_device(device_id):
+                        messagebox.showerror("Lỗi", "Không thể kết nối đến emulator.")
+                        return
+                    # Update selected device in main window
+                    self.main_window.root.after(0, lambda: self.main_window.selected_device_var.set(device_id))
+            
+            # Final verification: ensure emulator is connected with correct device_id
+            if not emulator.connected or not emulator.device_id:
+                messagebox.showerror("Lỗi", "Emulator không được kết nối đúng cách.")
+                return
             
             # Take screenshot
             screenshot = emulator.screenshot()
             if not screenshot:
-                messagebox.showerror("Lỗi", "Không thể chụp màn hình emulator.")
+                messagebox.showerror("Lỗi", f"Không thể chụp màn hình emulator.\nDevice ID: {emulator.device_id}, Connected: {emulator.connected}")
                 return
             
             # Create coordinate picker window
@@ -1403,43 +1499,6 @@ class TaskBuilderWindow:
             foreground="gray"
         )
         instructions.grid(row=3, column=0, pady=5)
-    
-    def pick_coordinates(self):
-        """Pick coordinates from emulator screen"""
-        try:
-            # Import emulator controller
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-            from emulator.controller import EmulatorController
-            
-            # Connect to emulator
-            adb_path = self.main_window.find_adb()
-            if not adb_path:
-                messagebox.showerror("Lỗi", "Không tìm thấy ADB. Vui lòng kiểm tra kết nối emulator.")
-                return
-            
-            emulator = EmulatorController(emulator_type="ldplayer", adb_path=adb_path)
-            if not emulator.connect():
-                # Try auto
-                emulator = EmulatorController(emulator_type="auto", adb_path=adb_path)
-                if not emulator.connect():
-                    messagebox.showerror("Lỗi", "Không thể kết nối đến emulator. Vui lòng kiểm tra kết nối.")
-                    return
-            
-            # Take screenshot
-            screenshot = emulator.screenshot()
-            if not screenshot:
-                messagebox.showerror("Lỗi", "Không thể chụp màn hình emulator.")
-                return
-            
-            # Create coordinate picker window
-            self._show_coordinate_picker(screenshot, emulator)
-            
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Lỗi khi lấy tọa độ: {e}")
-            import traceback
-            print(traceback.format_exc())
     
     def _show_coordinate_picker(self, screenshot, emulator):
         """Show screenshot and allow user to click to get coordinates"""

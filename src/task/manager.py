@@ -226,20 +226,22 @@ class TaskManager:
             self.logger.error("Find and click step missing template path")
             return False
         
-        threshold = step.get("threshold", 0.8)
+        threshold = step.get("threshold", 0.7)
         timeout = step.get("timeout", 10)
         click_all = step.get("click_all", False)  # Click all occurrences
         continue_if_not_found = step.get("continue_if_not_found", False)  # Continue to next step if not found
         goto_step_if_found = step.get("goto_step_if_found")  # Jump to step index if found
         goto_step_if_not_found = step.get("goto_step_if_not_found")  # Jump to step index if not found
         
-        # Try each template in order until one is found
+        # Try each template in order until one is found on screen
         game_name = self.game_config.get("name", "")
         sanitized_game_name = sanitize_filename(game_name)
         
         found_template = None
         found_template_path = None
         
+        # First, verify all template files exist
+        valid_templates = []
         for template in template_list:
             # Try game-specific template first, then global
             template_path = Path("config/templates") / sanitized_game_name / template
@@ -247,15 +249,12 @@ class TaskManager:
                 template_path = Path("config/templates") / template
             
             if template_path.exists():
-                found_template = template
-                found_template_path = template_path
-                self.logger.info(f"Tìm thấy template: {template}")
-                break
+                valid_templates.append((template, template_path))
             else:
-                self.logger.debug(f"Template không tìm thấy: {template}, thử template tiếp theo...")
+                self.logger.warning(f"Template file không tồn tại: {template}")
         
-        if not found_template_path:
-            self.logger.error(f"Không tìm thấy template nào trong danh sách: {template_list}")
+        if not valid_templates:
+            self.logger.error(f"Không tìm thấy file template nào trong danh sách: {template_list}")
             if goto_step_if_not_found:
                 self.next_step_index = goto_step_if_not_found
                 self.logger.info(f"Không tìm thấy template nào, nhảy đến step {goto_step_if_not_found}")
@@ -265,8 +264,8 @@ class TaskManager:
                 return True
             return False
         
-        # Use the found template
-        template_path = found_template_path
+        # Log all templates that will be tried
+        self.logger.info(f"Sẽ thử tìm {len(valid_templates)} template(s): {[t[0] for t in valid_templates]}")
         
         if click_all:
             # Find and click all occurrences
@@ -283,15 +282,32 @@ class TaskManager:
             # Wait a bit for screen to stabilize
             time.sleep(0.5)
             
-            # Find all templates
-            all_matches = self.matcher.find_all_templates(
-                screenshot,
-                str(template_path),
-                threshold=threshold
-            )
+            # Try each template until one is found
+            screenshot_size = screenshot.size if screenshot else None
+            found_template = None
+            found_template_path = None
+            all_matches = []
+            
+            for template_name, template_path in valid_templates:
+                self.logger.info(f"Đang thử tìm template: {template_name} (Threshold: {threshold})")
+                # Find all templates
+                matches = self.matcher.find_all_templates(
+                    screenshot,
+                    str(template_path),
+                    threshold=threshold
+                )
+                
+                if matches:
+                    found_template = template_name
+                    found_template_path = template_path
+                    all_matches = matches
+                    self.logger.info(f"✓ Tìm thấy {len(matches)} lần xuất hiện của template: {template_name}")
+                    break
+                else:
+                    self.logger.debug(f"✗ Không tìm thấy template: {template_name}, thử template tiếp theo...")
             
             if not all_matches:
-                self.logger.warning(f"No templates found: {found_template}")
+                self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) (Screenshot: {screenshot_size}, Threshold: {threshold})")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
@@ -300,8 +316,6 @@ class TaskManager:
                     self.logger.info("Tiếp tục step tiếp theo")
                     return True
                 return False
-            
-            self.logger.info(f"Found {len(all_matches)} occurrences of template: {found_template}")
             
             # Click all matches
             delay = step.get("delay", 0.5)
@@ -318,15 +332,36 @@ class TaskManager:
             return True
         else:
             # Original behavior: wait for template and click first occurrence
+            # Try each template until one is found
             # Log device info for debugging
             if hasattr(self.emulator, 'device_id'):
                 self.logger.info(f"Tìm template từ device: {self.emulator.device_id}")
-            result = self.matcher.wait_for_template(
-                self.emulator.screenshot,
-                str(template_path),
-                timeout=timeout,
-                threshold=threshold
-            )
+            
+            found_template = None
+            found_template_path = None
+            result = None
+            
+            # Try each template in order
+            # Divide timeout equally among all templates
+            timeout_per_template = max(1.0, timeout / len(valid_templates))
+            self.logger.info(f"Timeout cho mỗi template: {timeout_per_template:.1f} giây (tổng: {timeout} giây)")
+            
+            for template_name, template_path in valid_templates:
+                self.logger.info(f"Đang thử tìm template: {template_name} (Threshold: {threshold}, Timeout: {timeout_per_template:.1f}s)")
+                result = self.matcher.wait_for_template(
+                    self.emulator.screenshot,
+                    str(template_path),
+                    timeout=timeout_per_template,
+                    threshold=threshold
+                )
+                
+                if result:
+                    found_template = template_name
+                    found_template_path = template_path
+                    self.logger.info(f"✓ Tìm thấy template: {template_name}")
+                    break
+                else:
+                    self.logger.debug(f"✗ Không tìm thấy template: {template_name}, thử template tiếp theo...")
             
             if result:
                 x, y = result
@@ -341,7 +376,7 @@ class TaskManager:
                 
                 return True
             else:
-                self.logger.warning(f"Template not found: {found_template}")
+                self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) sau {timeout} giây")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
