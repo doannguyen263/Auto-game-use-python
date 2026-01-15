@@ -94,7 +94,7 @@ class TaskBuilderWindow:
         scrollbar = ttk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        self.steps_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=15)
+        self.steps_listbox = tk.Listbox(list_frame, yscrollcommand=scrollbar.set, height=7)
         self.steps_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.steps_listbox.bind("<<ListboxSelect>>", self.on_step_selected)
         scrollbar.config(command=self.steps_listbox.yview)
@@ -152,6 +152,10 @@ class TaskBuilderWindow:
     
     def on_step_type_changed(self, event=None):
         """Handle step type change"""
+        # Initialize templates list when switching to find_and_click
+        if not hasattr(self, 'templates_list'):
+            self.templates_list = []
+        
         # Clear params frame
         for widget in self.params_frame.winfo_children():
             widget.destroy()
@@ -201,15 +205,48 @@ class TaskBuilderWindow:
             ttk.Entry(self.params_frame, textvariable=self.duration_swipe_var, width=15).grid(row=row+2, column=1, padx=5)
         
         elif step_type in ["find_and_click", "wait_template"]:
-            ttk.Label(self.params_frame, text="Template:").grid(row=row, column=0, sticky=tk.W, padx=5)
-            self.template_var = tk.StringVar()
-            template_entry = ttk.Entry(self.params_frame, textvariable=self.template_var, width=30)
-            template_entry.grid(row=row, column=1, padx=5)
-            
-            button_frame_template = ttk.Frame(self.params_frame)
-            button_frame_template.grid(row=row, column=2, padx=5)
-            ttk.Button(button_frame_template, text="📁 Chọn file", command=self.browse_template).pack(side=tk.LEFT, padx=2)
-            ttk.Button(button_frame_template, text="📸 Chụp màn hình", command=self.capture_template).pack(side=tk.LEFT, padx=2)
+            # Multi-template support for find_and_click
+            if step_type == "find_and_click":
+                ttk.Label(self.params_frame, text="Templates (tìm theo thứ tự):").grid(row=row, column=0, sticky=tk.NW, padx=5, pady=5)
+                
+                # Frame for template list
+                template_list_frame = ttk.Frame(self.params_frame)
+                template_list_frame.grid(row=row, column=1, columnspan=3, sticky=(tk.W, tk.E), padx=5, pady=5)
+                
+                # Listbox for templates
+                listbox_frame = ttk.Frame(template_list_frame)
+                listbox_frame.pack(fill=tk.BOTH, expand=True)
+                
+                scrollbar = ttk.Scrollbar(listbox_frame)
+                scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                
+                self.templates_listbox = tk.Listbox(listbox_frame, height=4, yscrollcommand=scrollbar.set)
+                self.templates_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                scrollbar.config(command=self.templates_listbox.yview)
+                
+                # Buttons for template management
+                template_buttons_frame = ttk.Frame(template_list_frame)
+                template_buttons_frame.pack(fill=tk.X, pady=2)
+                
+                ttk.Button(template_buttons_frame, text="➕ Thêm", command=self.add_template_to_list).pack(side=tk.LEFT, padx=2)
+                ttk.Button(template_buttons_frame, text="➖ Xóa", command=self.remove_template_from_list).pack(side=tk.LEFT, padx=2)
+                ttk.Button(template_buttons_frame, text="⬆ Lên", command=self.move_template_up).pack(side=tk.LEFT, padx=2)
+                ttk.Button(template_buttons_frame, text="⬇ Xuống", command=self.move_template_down).pack(side=tk.LEFT, padx=2)
+                
+                # Store templates list
+                self.templates_list = []
+                row += 1
+            else:
+                # wait_template: keep single template
+                ttk.Label(self.params_frame, text="Template:").grid(row=row, column=0, sticky=tk.W, padx=5)
+                self.template_var = tk.StringVar()
+                template_entry = ttk.Entry(self.params_frame, textvariable=self.template_var, width=30)
+                template_entry.grid(row=row, column=1, padx=5)
+                
+                button_frame_template = ttk.Frame(self.params_frame)
+                button_frame_template.grid(row=row, column=2, padx=5)
+                ttk.Button(button_frame_template, text="📁 Chọn file", command=self.browse_template).pack(side=tk.LEFT, padx=2)
+                ttk.Button(button_frame_template, text="📸 Chụp màn hình", command=self.capture_template).pack(side=tk.LEFT, padx=2)
             
             ttk.Label(self.params_frame, text="Timeout (giây):").grid(row=row+1, column=0, sticky=tk.W, padx=5)
             self.timeout_var = tk.StringVar(value="10")
@@ -284,10 +321,111 @@ class TaskBuilderWindow:
         )
         if filename:
             # Copy to templates directory if not already there
-            template_path = Path("config/templates")
-            template_path.mkdir(parents=True, exist_ok=True)
+            sanitized_game_name = sanitize_filename(self.game_name)
+            template_dir = Path("config/templates") / sanitized_game_name
+            template_dir.mkdir(parents=True, exist_ok=True)
             template_name = Path(filename).name
-            self.template_var.set(template_name)
+            template_path = template_dir / template_name
+            
+            # Copy file if not already in templates directory
+            if Path(filename) != template_path:
+                from shutil import copy2
+                copy2(filename, template_path)
+            
+            # If find_and_click with multi-template support, add to list
+            if hasattr(self, 'templates_listbox'):
+                # Ensure templates_list exists
+                if not hasattr(self, 'templates_list'):
+                    self.templates_list = []
+                self.templates_list.append(template_name)
+                self.update_templates_listbox()
+                self.templates_listbox.selection_clear(0, tk.END)
+                self.templates_listbox.selection_set(len(self.templates_list) - 1)
+                self.templates_listbox.see(len(self.templates_list) - 1)
+            elif hasattr(self, 'template_var'):
+                self.template_var.set(template_name)
+    
+    def add_template_to_list(self):
+        """Add template to list (via browse or capture)"""
+        # Show dialog to choose: browse file or capture screenshot
+        dialog = tk.Toplevel(self.window)
+        dialog.title("Thêm Template")
+        dialog.transient(self.window)
+        dialog.grab_set()
+        
+        ttk.Label(dialog, text="Chọn cách thêm template:").pack(pady=10)
+        
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        def browse_and_add():
+            dialog.destroy()
+            self.browse_template()
+        
+        def capture_and_add():
+            dialog.destroy()
+            self.capture_template()
+        
+        ttk.Button(button_frame, text="📁 Chọn file", command=browse_and_add).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="📸 Chụp màn hình", command=capture_and_add).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="❌ Hủy", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+    
+    def remove_template_from_list(self):
+        """Remove selected template from list"""
+        if not hasattr(self, 'templates_listbox'):
+            return
+        
+        selection = self.templates_listbox.curselection()
+        if not selection:
+            messagebox.showwarning("Cảnh báo", "Vui lòng chọn template để xóa!")
+            return
+        
+        index = selection[0]
+        if 0 <= index < len(self.templates_list):
+            removed = self.templates_list.pop(index)
+            self.update_templates_listbox()
+            messagebox.showinfo("Thành công", f"Đã xóa template: {removed}")
+    
+    def move_template_up(self):
+        """Move selected template up in list"""
+        if not hasattr(self, 'templates_listbox'):
+            return
+        
+        selection = self.templates_listbox.curselection()
+        if not selection or selection[0] == 0:
+            return
+        
+        index = selection[0]
+        if 0 < index < len(self.templates_list):
+            self.templates_list[index], self.templates_list[index - 1] = self.templates_list[index - 1], self.templates_list[index]
+            self.update_templates_listbox()
+            self.templates_listbox.selection_set(index - 1)
+            self.templates_listbox.see(index - 1)
+    
+    def move_template_down(self):
+        """Move selected template down in list"""
+        if not hasattr(self, 'templates_listbox'):
+            return
+        
+        selection = self.templates_listbox.curselection()
+        if not selection or selection[0] >= len(self.templates_list) - 1:
+            return
+        
+        index = selection[0]
+        if 0 <= index < len(self.templates_list) - 1:
+            self.templates_list[index], self.templates_list[index + 1] = self.templates_list[index + 1], self.templates_list[index]
+            self.update_templates_listbox()
+            self.templates_listbox.selection_set(index + 1)
+            self.templates_listbox.see(index + 1)
+    
+    def update_templates_listbox(self):
+        """Update templates listbox display"""
+        if not hasattr(self, 'templates_listbox'):
+            return
+        
+        self.templates_listbox.delete(0, tk.END)
+        for i, template in enumerate(self.templates_list):
+            self.templates_listbox.insert(tk.END, f"{i+1}. {template}")
     
     def capture_template(self):
         """Capture template from emulator screen"""
@@ -679,7 +817,18 @@ class TaskBuilderWindow:
                 template_image.save(template_path)
                 
                 # Set template name (relative to templates directory)
-                self.template_var.set(template_name)
+                # If find_and_click with multi-template support, add to list
+                if hasattr(self, 'templates_listbox'):
+                    # Ensure templates_list exists
+                    if not hasattr(self, 'templates_list'):
+                        self.templates_list = []
+                    self.templates_list.append(template_name)
+                    self.update_templates_listbox()
+                    self.templates_listbox.selection_clear(0, tk.END)
+                    self.templates_listbox.selection_set(len(self.templates_list) - 1)
+                    self.templates_listbox.see(len(self.templates_list) - 1)
+                elif hasattr(self, 'template_var'):
+                    self.template_var.set(template_name)
                 
                 picker_window.destroy()
                 messagebox.showinfo("Thành công", f"Đã lưu template: {template_name}")
@@ -824,7 +973,19 @@ class TaskBuilderWindow:
                 step["duration"] = int(self.duration_swipe_var.get() or "300")
             
             elif step_type in ["find_and_click", "wait_template"]:
-                step["template"] = self.template_var.get() or ""
+                # For find_and_click, support multiple templates
+                if step_type == "find_and_click" and hasattr(self, 'templates_list') and self.templates_list:
+                    step["templates"] = self.templates_list.copy()  # Save as list
+                    # Also keep single template for backward compatibility
+                    if self.templates_list:
+                        step["template"] = self.templates_list[0]
+                else:
+                    # Single template (for wait_template or backward compatibility)
+                    template_value = self.template_var.get() or ""
+                    step["template"] = template_value
+                    if template_value:
+                        step["templates"] = [template_value]  # Convert to list for consistency
+                
                 step["timeout"] = int(self.timeout_var.get() or "10")
                 step["threshold"] = float(self.threshold_var.get() or "0.8")
                 if step_type == "find_and_click":
@@ -882,7 +1043,22 @@ class TaskBuilderWindow:
             self.y2_var.set(str(step.get("y2", 0)))
             self.duration_swipe_var.set(str(step.get("duration", 300)))
         elif step_type in ["find_and_click", "wait_template"]:
-            self.template_var.set(step.get("template", ""))
+            # Load templates: support both list and single template
+            if step_type == "find_and_click" and hasattr(self, 'templates_listbox'):
+                templates = step.get("templates", [])
+                if not templates and step.get("template"):
+                    # Backward compatibility: convert single template to list
+                    templates = [step.get("template")]
+                self.templates_list = templates.copy() if templates else []
+                self.update_templates_listbox()
+            else:
+                # Single template for wait_template
+                template_value = step.get("template", "")
+                if not template_value and step.get("templates"):
+                    # If templates list exists but no single template, use first one
+                    template_value = step.get("templates", [""])[0]
+                self.template_var.set(template_value)
+            
             self.timeout_var.set(str(step.get("timeout", 10)))
             self.threshold_var.set(str(step.get("threshold", 0.8)))
             if step_type == "find_and_click":

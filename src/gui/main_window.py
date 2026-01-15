@@ -6,6 +6,7 @@ from tkinter import ttk, messagebox, scrolledtext
 import threading
 from pathlib import Path
 import sys
+import json
 
 # Add parent to path
 parent_dir = Path(__file__).parent.parent.parent
@@ -227,11 +228,59 @@ class MainWindow:
         
         if games:
             self.game_combo['values'] = games
-            if games:
-                self.current_game.set(games[0])
+            # Try to load last selection
+            last_selection = self.load_last_selection()
+            if last_selection and last_selection.get("game") in games:
+                self.current_game.set(last_selection["game"])
                 self.on_game_selected()
+                # Try to restore task selection
+                if last_selection.get("task"):
+                    # Wait a bit for tasks to load, then set task
+                    self.root.after(100, lambda: self._restore_task_selection(last_selection.get("task")))
+            else:
+                # Default to first game
+                if games:
+                    self.current_game.set(games[0])
+                    self.on_game_selected()
         else:
             self.log("Không tìm thấy game nào. Vui lòng tạo game mới.")
+    
+    def _restore_task_selection(self, task_name):
+        """Restore task selection after game is loaded"""
+        tasks = list(self.task_combo['values'])
+        if task_name in tasks:
+            self.current_task.set(task_name)
+            self.on_task_selected()
+    
+    def save_last_selection(self):
+        """Save last selected game and task"""
+        config_dir = Path("config")
+        config_dir.mkdir(parents=True, exist_ok=True)
+        last_selection_file = config_dir / "last_selection.json"
+        
+        try:
+            data = {
+                "game": self.current_game.get(),
+                "task": self.current_task.get()
+            }
+            with open(last_selection_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            # Silently fail if can't save
+            pass
+    
+    def load_last_selection(self):
+        """Load last selected game and task"""
+        last_selection_file = Path("config/last_selection.json")
+        
+        if not last_selection_file.exists():
+            return None
+        
+        try:
+            with open(last_selection_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return None
     
     def on_game_selected(self, event=None):
         """Handle game selection"""
@@ -239,13 +288,21 @@ class MainWindow:
         if not game_name:
             return
         
+        # Save selection
+        self.save_last_selection()
+        
         # Load tasks for selected game
         game_config = self.config_manager.load_game_config(game_name)
         if game_config:
             tasks = list(game_config.get("tasks", {}).keys())
             self.task_combo['values'] = tasks
             if tasks:
-                self.current_task.set(tasks[0])
+                # Try to restore last task selection
+                last_selection = self.load_last_selection()
+                if last_selection and last_selection.get("task") in tasks:
+                    self.current_task.set(last_selection["task"])
+                else:
+                    self.current_task.set(tasks[0])
                 self.on_task_selected()  # Update button state
         else:
             self.task_combo['values'] = []
@@ -254,6 +311,8 @@ class MainWindow:
     
     def on_task_selected(self, event=None):
         """Handle task selection - update button text"""
+        # Save selection
+        self.save_last_selection()
         self.update_task_button()
     
     def update_task_button(self):

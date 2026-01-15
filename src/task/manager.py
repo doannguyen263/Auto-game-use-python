@@ -213,7 +213,19 @@ class TaskManager:
     
     def _step_find_and_click(self, step: Dict[str, Any]) -> bool:
         """Find template and click on it"""
-        template = step.get("template")
+        # Support multiple templates: try each one in order until found
+        templates = step.get("templates", [])
+        template = step.get("template")  # Backward compatibility
+        
+        # If templates list exists, use it; otherwise use single template
+        if templates:
+            template_list = templates
+        elif template:
+            template_list = [template]
+        else:
+            self.logger.error("Find and click step missing template path")
+            return False
+        
         threshold = step.get("threshold", 0.8)
         timeout = step.get("timeout", 10)
         click_all = step.get("click_all", False)  # Click all occurrences
@@ -221,21 +233,40 @@ class TaskManager:
         goto_step_if_found = step.get("goto_step_if_found")  # Jump to step index if found
         goto_step_if_not_found = step.get("goto_step_if_not_found")  # Jump to step index if not found
         
-        if not template:
-            self.logger.error("Find and click step missing template path")
-            return False
-        
-        # Try game-specific template first, then global
-        # Use sanitized game name (no accents) for directory
+        # Try each template in order until one is found
         game_name = self.game_config.get("name", "")
         sanitized_game_name = sanitize_filename(game_name)
-        template_path = Path("config/templates") / sanitized_game_name / template
-        if not template_path.exists():
-            template_path = Path("config/templates") / template
         
-        if not template_path.exists():
-            self.logger.error(f"Template not found: {template_path}")
+        found_template = None
+        found_template_path = None
+        
+        for template in template_list:
+            # Try game-specific template first, then global
+            template_path = Path("config/templates") / sanitized_game_name / template
+            if not template_path.exists():
+                template_path = Path("config/templates") / template
+            
+            if template_path.exists():
+                found_template = template
+                found_template_path = template_path
+                self.logger.info(f"Tìm thấy template: {template}")
+                break
+            else:
+                self.logger.debug(f"Template không tìm thấy: {template}, thử template tiếp theo...")
+        
+        if not found_template_path:
+            self.logger.error(f"Không tìm thấy template nào trong danh sách: {template_list}")
+            if goto_step_if_not_found:
+                self.next_step_index = goto_step_if_not_found
+                self.logger.info(f"Không tìm thấy template nào, nhảy đến step {goto_step_if_not_found}")
+                return True
+            elif continue_if_not_found:
+                self.logger.info("Tiếp tục step tiếp theo")
+                return True
             return False
+        
+        # Use the found template
+        template_path = found_template_path
         
         if click_all:
             # Find and click all occurrences
@@ -260,7 +291,7 @@ class TaskManager:
             )
             
             if not all_matches:
-                self.logger.warning(f"No templates found: {template}")
+                self.logger.warning(f"No templates found: {found_template}")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
@@ -270,7 +301,7 @@ class TaskManager:
                     return True
                 return False
             
-            self.logger.info(f"Found {len(all_matches)} occurrences of template")
+            self.logger.info(f"Found {len(all_matches)} occurrences of template: {found_template}")
             
             # Click all matches
             delay = step.get("delay", 0.5)
@@ -299,6 +330,7 @@ class TaskManager:
             
             if result:
                 x, y = result
+                self.logger.info(f"Đã tìm thấy và click vào template: {found_template} tại ({x}, {y})")
                 self.emulator.click(x, y)
                 time.sleep(step.get("delay", 0.5))
                 
@@ -309,7 +341,7 @@ class TaskManager:
                 
                 return True
             else:
-                self.logger.warning(f"Template not found: {template}")
+                self.logger.warning(f"Template not found: {found_template}")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
