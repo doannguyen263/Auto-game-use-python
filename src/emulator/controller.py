@@ -326,7 +326,7 @@ class EmulatorController:
             # Take screenshot via ADB (binary output)
             full_command = [self.adb_path, "-s", self.device_id, "exec-out", "screencap", "-p"]
             # Debug: log the command being executed
-            self._log(f"📸 Chụp màn hình từ device: {self.device_id}")
+            # self._log(f"📸 Chụp màn hình từ device: {self.device_id}")
             process = subprocess.run(
                 full_command,
                 capture_output=True,

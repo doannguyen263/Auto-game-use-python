@@ -265,7 +265,7 @@ class TaskManager:
             return False
         
         # Log all templates that will be tried
-        self.logger.info(f"Sẽ thử tìm {len(valid_templates)} template(s): {[t[0] for t in valid_templates]}")
+        # self.logger.info(f"Sẽ thử tìm {len(valid_templates)} template(s): {[t[0] for t in valid_templates]}")
         
         if click_all:
             # Find and click all occurrences
@@ -334,8 +334,8 @@ class TaskManager:
             # Original behavior: wait for template and click first occurrence
             # Try each template until one is found
             # Log device info for debugging
-            if hasattr(self.emulator, 'device_id'):
-                self.logger.info(f"Tìm template từ device: {self.emulator.device_id}")
+            # if hasattr(self.emulator, 'device_id'):
+            #     self.logger.info(f"Tìm template từ device: {self.emulator.device_id}")
             
             found_template = None
             found_template_path = None
@@ -344,7 +344,7 @@ class TaskManager:
             # Try each template in order
             # Divide timeout equally among all templates
             timeout_per_template = max(1.0, timeout / len(valid_templates))
-            self.logger.info(f"Timeout cho mỗi template: {timeout_per_template:.1f} giây (tổng: {timeout} giây)")
+            # self.logger.info(f"Timeout cho mỗi template: {timeout_per_template:.1f} giây (tổng: {timeout} giây)")
             
             for template_name, template_path in valid_templates:
                 self.logger.info(f"Đang thử tìm template: {template_name} (Threshold: {threshold}, Timeout: {timeout_per_template:.1f}s)")
