@@ -43,6 +43,7 @@ class TaskManager:
         self.next_step_index = None  # For conditional branching
         self.notification_callback = notification_callback  # Callback to show notification dialog
         self.user_requested_stop = False  # Flag to indicate user requested stop from notification
+        self.force_stop_task = False  # Flag to force stop entire task (including all loops)
         
         # Set logger for emulator if it supports it
         if hasattr(self.emulator, 'set_logger'):
@@ -68,7 +69,9 @@ class TaskManager:
         self.logger.info(f"Starting task: {task_name}")
         self.current_task_name = task_name
         
+        # Reset flags
         self.running = True
+        self.force_stop_task = False
         
         try:
             # Execute task steps
@@ -143,6 +146,8 @@ class TaskManager:
             return self._step_screenshot(step)
         elif step_type == "notification":
             return self._step_notification(step)
+        elif step_type == "stop_task":
+            return self._step_stop_task(step)
         else:
             self.logger.warning(f"Unknown step type: {step_type}")
             return False
@@ -307,7 +312,7 @@ class TaskManager:
                     self.logger.debug(f"✗ Không tìm thấy template: {template_name}, thử template tiếp theo...")
             
             if not all_matches:
-                self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) (Screenshot: {screenshot_size}, Threshold: {threshold})")
+                # self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) (Screenshot: {screenshot_size}, Threshold: {threshold})")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
@@ -347,7 +352,7 @@ class TaskManager:
             # self.logger.info(f"Timeout cho mỗi template: {timeout_per_template:.1f} giây (tổng: {timeout} giây)")
             
             for template_name, template_path in valid_templates:
-                self.logger.info(f"Đang thử tìm template: {template_name} (Threshold: {threshold}, Timeout: {timeout_per_template:.1f}s)")
+                self.logger.info(f"Đang thử tìm template: {template_name}")
                 result = self.matcher.wait_for_template(
                     self.emulator.screenshot,
                     str(template_path),
@@ -365,7 +370,7 @@ class TaskManager:
             
             if result:
                 x, y = result
-                self.logger.info(f"Đã tìm thấy và click vào template: {found_template} tại ({x}, {y})")
+                # self.logger.info(f"Đã tìm thấy và click vào template: {found_template} tại ({x}, {y})")
                 self.emulator.click(x, y)
                 time.sleep(step.get("delay", 0.5))
                 
@@ -376,7 +381,7 @@ class TaskManager:
                 
                 return True
             else:
-                self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) sau {timeout} giây")
+                # self.logger.warning(f"Không tìm thấy template nào trong {len(valid_templates)} template(s) sau {timeout} giây")
                 if goto_step_if_not_found:
                     self.next_step_index = goto_step_if_not_found
                     self.logger.info(f"Không tìm thấy template, nhảy đến step {goto_step_if_not_found}")
@@ -430,6 +435,21 @@ class TaskManager:
             # No callback, just log and continue
             self.logger.warning("Notification callback not set, continuing...")
             return True
+    
+    def _step_stop_task(self, step: Dict[str, Any]) -> bool:
+        """Stop entire task execution (including all loops)"""
+        message = step.get("message", "Đã đến step dừng task")
+        step_name = step.get("name", "Dừng task")
+        
+        self.logger.info(f"Step dừng task: {step_name}")
+        if message:
+            self.logger.info(f"Lý do: {message}")
+        
+        # Set flags to stop task and all loops
+        self.force_stop_task = True
+        self.running = False
+        
+        return True
     
     def stop(self):
         """Stop task execution"""

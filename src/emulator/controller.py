@@ -49,12 +49,13 @@ class EmulatorController:
             print(message)
     
     @staticmethod
-    def list_all_devices(adb_path: str = None) -> list:
+    def list_all_devices(adb_path: str = None, auto_connect: bool = True) -> list:
         """
         List all connected devices/emulators
         
         Args:
             adb_path: Path to ADB executable (None to auto-detect)
+            auto_connect: If True, try to auto-connect to common ports before listing
         
         Returns:
             List of device IDs
@@ -63,24 +64,90 @@ class EmulatorController:
             controller = EmulatorController()
             adb_path = controller.adb_path
         
+        # Try to auto-connect to common ports first
+        if auto_connect:
+            EmulatorController._auto_connect_common_ports(adb_path)
+        
         try:
             result = subprocess.run(
                 [adb_path, "devices"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=10  # Increase timeout
             )
             
+            # Debug: print raw output
+            # print(f"ADB devices raw output:\n{result.stdout}")
+            
             devices = []
-            for line in result.stdout.strip().split('\n')[1:]:
-                if line.strip() and 'device' in line:
-                    device_id = line.split()[0]
-                    devices.append(device_id)
+            lines = result.stdout.strip().split('\n')
+            
+            # Skip first line (header: "List of devices attached")
+            for line in lines[1:]:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # Handle both tab and space separators
+                # ADB output format: "device_id\tstatus" or "device_id    status"
+                if '\t' in line:
+                    parts = line.split('\t')
+                else:
+                    # Try splitting by multiple spaces
+                    parts = line.split()
+                
+                if len(parts) >= 1:
+                    device_id = parts[0].strip()
+                    # Only add if device_id is not empty and doesn't look like a status
+                    if device_id and device_id not in ['device', 'offline', 'unauthorized', 'no', 'permissions']:
+                        # Avoid duplicates
+                        if device_id not in devices:
+                            devices.append(device_id)
             
             return devices
+        except subprocess.TimeoutExpired:
+            print("Error listing devices: ADB command timeout")
+            return []
         except Exception as e:
             print(f"Error listing devices: {e}")
             return []
+    
+    @staticmethod
+    def _auto_connect_common_ports(adb_path: str):
+        """
+        Try to auto-connect to common emulator ports
+        
+        Args:
+            adb_path: Path to ADB executable
+        """
+        try:
+            # Common ports for emulators (LDPlayer, Nox, BlueStacks, etc.)
+            # LDPlayer typically uses: 5555 (1st), 5557 (2nd), 5565 (3rd), 5575 (4th), etc.
+            # Focus on most common ports first - this covers most cases
+            priority_ports = [5555, 5557, 5565, 5575, 5585, 5595, 5554, 5556, 5558, 5559, 5560, 5561, 5562, 5563, 5564]
+            
+            # Also try a few more common clone ports
+            additional_ports = [5566, 5567, 5568, 5569, 5570, 5571, 5572, 5573, 5574, 5576, 5577, 5578, 5579, 5580]
+            
+            all_ports = priority_ports + additional_ports
+            
+            # Use threading or process pool for faster scanning if needed, but for now keep it simple
+            for port in all_ports:
+                try:
+                    # Try to connect (will silently fail if already connected or not available)
+                    # Use very short timeout and don't wait for output
+                    subprocess.run(
+                        [adb_path, "connect", f"127.0.0.1:{port}"],
+                        capture_output=True,
+                        text=True,
+                        timeout=0.3,  # Very short timeout
+                        stderr=subprocess.DEVNULL  # Suppress errors
+                    )
+                except (subprocess.TimeoutExpired, Exception):
+                    pass  # Ignore all errors, just try next port
+        except Exception:
+            # Don't let errors in auto-connect break device listing
+            pass
     
     def connect_to_device(self, device_id: str) -> bool:
         """
@@ -93,7 +160,14 @@ class EmulatorController:
             True if connected successfully
         """
         try:
-            # Check if device exists
+            # Check if device exists (use list_all_devices to get all devices)
+            all_devices = self.list_all_devices(self.adb_path)
+            
+            if device_id not in all_devices:
+                print(f"Device {device_id} not found in available devices")
+                return False
+            
+            # Check device status - only connect if device is ready
             result = subprocess.run(
                 [self.adb_path, "devices"],
                 capture_output=True,
@@ -101,12 +175,22 @@ class EmulatorController:
                 timeout=5
             )
             
-            devices = [line.split()[0] for line in result.stdout.strip().split('\n')[1:] 
-                      if line.strip() and 'device' in line]
+            # Check if device status is "device" (ready)
+            device_ready = False
+            for line in result.stdout.strip().split('\n')[1:]:
+                line = line.strip()
+                if line and '\t' in line:
+                    parts = line.split('\t')
+                    if len(parts) >= 2 and parts[0].strip() == device_id:
+                        status = parts[1].strip()
+                        if status == 'device':
+                            device_ready = True
+                        break
             
-            if device_id not in devices:
-                print(f"Device {device_id} not found")
-                return False
+            if not device_ready:
+                print(f"Device {device_id} is not ready (status may be offline/unauthorized)")
+                # Still try to connect, might work
+                # return False
             
             self.device_id = device_id
             self.connected = True
@@ -227,7 +311,22 @@ class EmulatorController:
     def _connect_ldplayer(self) -> bool:
         """Connect to LDPlayer emulator"""
         # LDPlayer typically uses ports: 5555 (first), 5557 (second), 5565 (third), etc.
-        common_ports = [5555, 5557, 5565, 5575, 5585]
+        # Scan wider range for cloned instances
+        common_ports = []
+        
+        # Standard ports
+        common_ports.extend([5554, 5555, 5556, 5557, 5558])
+        
+        # Scan range 5555-5600 (step by 2) to find all clones
+        for port in range(5555, 5601, 2):
+            if port not in common_ports:
+                common_ports.append(port)
+        
+        # Additional common ports
+        common_ports.extend([5565, 5575, 5585, 5595, 5605, 5615])
+        
+        # Remove duplicates and sort
+        common_ports = sorted(list(set(common_ports)))
         
         for port in common_ports:
             if self._try_connect_port(port):

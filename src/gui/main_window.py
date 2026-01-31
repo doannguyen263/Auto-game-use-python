@@ -346,24 +346,49 @@ class MainWindow:
         """Refresh list of available devices"""
         def refresh():
             try:
+                self.log("Đang refresh danh sách thiết bị...")
                 adb_path = self.find_adb()
                 if not adb_path:
                     self.available_devices = []
                     self.root.after(0, lambda: self.device_combo.config(values=[]))
+                    self.root.after(0, lambda: self.log("✗ Không tìm thấy ADB"))
                     return
                 
-                devices = EmulatorController.list_all_devices(adb_path)
+                self.log(f"Sử dụng ADB: {adb_path}")
+                
+                # Auto-connect to common ports before listing (to find all devices)
+                try:
+                    devices = EmulatorController.list_all_devices(adb_path, auto_connect=True)
+                except Exception as e:
+                    self.log(f"Lỗi khi liệt kê devices (với auto-connect): {e}")
+                    # Try without auto-connect as fallback
+                    try:
+                        devices = EmulatorController.list_all_devices(adb_path, auto_connect=False)
+                        self.log("Đã thử lại không dùng auto-connect")
+                    except Exception as e2:
+                        self.log(f"Lỗi khi liệt kê devices (fallback): {e2}")
+                        devices = []
+                
                 self.available_devices = devices
                 
                 # Update combobox
                 self.root.after(0, lambda: self.device_combo.config(values=devices))
+                
+                # Log number of devices found
+                if devices:
+                    device_list = ', '.join(devices)
+                    self.log(f"✓ Tìm thấy {len(devices)} thiết bị: {device_list}")
+                else:
+                    self.log("✗ Không tìm thấy thiết bị nào")
                 
                 # If no device selected and devices available, select first one
                 if devices and not self.selected_device_var.get():
                     self.root.after(0, lambda: self.selected_device_var.set(devices[0]))
                     self.root.after(0, lambda: self.on_device_selected(None))
             except Exception as e:
-                self.log(f"Lỗi khi refresh devices: {e}")
+                import traceback
+                error_msg = f"Lỗi khi refresh devices: {e}\n{traceback.format_exc()}"
+                self.log(error_msg)
         
         threading.Thread(target=refresh, daemon=True).start()
     
@@ -1083,6 +1108,15 @@ class MainWindow:
                             self.running = False
                             break
                         
+                        # Check if step requested force stop (stop_task step)
+                        if self.task_manager and hasattr(self.task_manager, 'force_stop_task') and self.task_manager.force_stop_task:
+                            self.log("Đã đến step dừng task, dừng toàn bộ task")
+                            if success:
+                                total_success += 1
+                                self.log(f"✓ Lần {i+1} hoàn thành")
+                            self.running = False
+                            break
+                        
                         if success:
                             total_success += 1
                             self.log(f"✓ Lần {i+1} hoàn thành")
@@ -1112,6 +1146,14 @@ class MainWindow:
                         # Check if user requested stop from notification dialog
                         if self.task_manager and hasattr(self.task_manager, 'user_requested_stop') and self.task_manager.user_requested_stop:
                             self.log("Người dùng đã chọn dừng từ thông báo")
+                            self.running = False
+                            break
+                        
+                        # Check if step requested force stop (stop_task step)
+                        if self.task_manager and hasattr(self.task_manager, 'force_stop_task') and self.task_manager.force_stop_task:
+                            self.log("Đã đến step dừng task, dừng toàn bộ task")
+                            if success:
+                                self.log(f"✓ Lần {current_iteration} hoàn thành")
                             self.running = False
                             break
                         

@@ -121,7 +121,7 @@ class TaskBuilderWindow:
         # Step type
         ttk.Label(editor_frame, text="Loại Step:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=5)
         self.step_type_var = tk.StringVar(value="wait")
-        step_types = ["wait", "click", "swipe", "find_and_click", "wait_template", "screenshot", "notification"]
+        step_types = ["wait", "click", "swipe", "find_and_click", "wait_template", "screenshot", "notification", "stop_task"]
         step_type_combo = ttk.Combobox(editor_frame, textvariable=self.step_type_var, values=step_types, width=20)
         step_type_combo.grid(row=0, column=1, padx=5, pady=5)
         step_type_combo.bind("<<ComboboxSelected>>", self.on_step_type_changed)
@@ -309,6 +309,18 @@ class TaskBuilderWindow:
             ttk.Label(
                 self.params_frame,
                 text="(Thông báo này sẽ hiển thị khi chạy đến step này, người dùng có thể chọn Tiếp tục hoặc Dừng lại)",
+                font=("Arial", 8),
+                foreground="gray"
+            ).grid(row=row+1, column=0, columnspan=4, sticky=tk.W, padx=5)
+        
+        elif step_type == "stop_task":
+            ttk.Label(self.params_frame, text="Thông báo (tùy chọn):").grid(row=row, column=0, sticky=tk.NW, padx=5, pady=5)
+            # Use ScrolledText for multi-line input
+            self.stop_task_message_text = scrolledtext.ScrolledText(self.params_frame, width=50, height=4, wrap=tk.WORD)
+            self.stop_task_message_text.grid(row=row, column=1, columnspan=3, padx=5, pady=5, sticky=(tk.W, tk.E))
+            ttk.Label(
+                self.params_frame,
+                text="(Khi đến step này, toàn bộ task sẽ dừng ngay lập tức, bất kể đang ở chế độ lặp nào)",
                 font=("Arial", 8),
                 foreground="gray"
             ).grid(row=row+1, column=0, columnspan=4, sticky=tk.W, padx=5)
@@ -1074,6 +1086,13 @@ class TaskBuilderWindow:
                     step["message"] = self.notification_text.get("1.0", tk.END).strip()
                 else:
                     step["message"] = ""
+            
+            elif step_type == "stop_task":
+                if hasattr(self, 'stop_task_message_text'):
+                    message = self.stop_task_message_text.get("1.0", tk.END).strip()
+                    if message:
+                        step["message"] = message
+                # No required fields for stop_task
         except (ValueError, AttributeError) as e:
             raise ValueError(f"Lỗi nhập liệu: {e}. Vui lòng kiểm tra lại các giá trị.")
         
@@ -1138,6 +1157,11 @@ class TaskBuilderWindow:
             if hasattr(self, 'notification_text'):
                 self.notification_text.delete("1.0", tk.END)
                 self.notification_text.insert("1.0", step.get("message", ""))
+        
+        elif step_type == "stop_task":
+            if hasattr(self, 'stop_task_message_text'):
+                self.stop_task_message_text.delete("1.0", tk.END)
+                self.stop_task_message_text.insert("1.0", step.get("message", ""))
     
     def clear_step_ui(self):
         """Clear step UI and exit edit mode"""
